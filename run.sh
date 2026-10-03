@@ -12,11 +12,41 @@ fi
 if [ ! -d .venv ]; then
   python3 -m venv .venv
 fi
-
 . .venv/bin/activate
 python -m pip install --upgrade pip >/dev/null
-python -m pip install -e .
+python -m pip install -e . >/dev/null
 
-SCOPE="${1:-examples/scope.yaml}"
-RULES="${2:-examples/rules.yaml}"
-maher-bounty run --scope "$SCOPE" --rules "$RULES"
+case "${1:-run}" in
+  doctor)
+    exec maher-bounty doctor
+    ;;
+  install-tools)
+    chmod +x tools/install-kali-recon.sh
+    exec ./tools/install-kali-recon.sh
+    ;;
+  recon)
+    DOMAIN="${2:?Usage: ./run.sh recon example.com}"
+    chmod +x tools/recon-passive.sh
+    ./tools/recon-passive.sh "$DOMAIN"
+    maher-bounty inventory "results/$DOMAIN"
+    echo "[+] Recon + normalized inventory complete: results/$DOMAIN/inventory.json"
+    ;;
+  run)
+    SCOPE="${2:-examples/scope.yaml}"
+    RULES="${3:-examples/rules.yaml}"
+    OUT="${4:-reports}"
+    INVENTORY="${MAHER_INVENTORY:-}"
+    if [ -n "$INVENTORY" ]; then
+      exec maher-bounty run --scope "$SCOPE" --rules "$RULES" --out "$OUT" --inventory "$INVENTORY"
+    fi
+    exec maher-bounty run --scope "$SCOPE" --rules "$RULES" --out "$OUT"
+    ;;
+  *)
+    echo "Maher Bounty Agents"
+    echo "  ./run.sh doctor"
+    echo "  ./run.sh install-tools"
+    echo "  ./run.sh recon example.com"
+    echo "  MAHER_INVENTORY=results/example.com/inventory.json ./run.sh run examples/scope.yaml examples/rules.yaml reports"
+    exit 2
+    ;;
+esac
