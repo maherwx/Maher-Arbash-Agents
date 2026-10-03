@@ -8,9 +8,7 @@ class LocalModelAdapter:
     """Optional adapter for any local OpenAI-compatible model server.
 
     The project is standalone and has no dependency on Maher OS or any cloud API.
-    Set MAHER_MODEL_URL and MAHER_MODEL_ID when you want agent reasoning through
-    a local model server. Without them, the project still runs and produces a
-    planning report.
+    Set MAHER_MODEL_URL and MAHER_MODEL_ID to enable model-assisted analysis.
     """
 
     def __init__(self):
@@ -19,11 +17,15 @@ class LocalModelAdapter:
         self.timeout = int(os.getenv("MAHER_MODEL_TIMEOUT", "120"))
 
     def analyze(self, agent, context):
+        inventory = context.get("inventory", {})
         if not self.url or not self.model:
+            counts = inventory.get("counts", {}) if isinstance(inventory, dict) else {}
             return {
                 "agent": agent["id"],
                 "status": "planned",
-                "observations": [],
+                "observations": [
+                    f"Inventory available: {counts.get('hosts', 0)} hosts, {counts.get('endpoints', 0)} endpoints, {counts.get('http', 0)} HTTP records"
+                ],
                 "candidate_findings": [],
                 "evidence_notes": ["No local model configured; set MAHER_MODEL_URL and MAHER_MODEL_ID to enable model-assisted analysis."],
                 "next_checks": [agent.get("mission", "")],
@@ -34,11 +36,16 @@ class LocalModelAdapter:
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a vulnerability-research agent operating only within the supplied authorized bug-bounty scope and rules. Return JSON only with keys: status, observations, candidate_findings, evidence_notes, next_checks.",
+                    "content": "You are a vulnerability-research agent operating within the supplied authorized bug-bounty program. Analyze the provided normalized reconnaissance inventory for your assigned mission. Prefer evidence-backed observations, identify duplicates, and return JSON only with keys: status, observations, candidate_findings, evidence_notes, next_checks.",
                 },
                 {
                     "role": "user",
-                    "content": json.dumps({"agent": agent, "scope": context.get("scope", {}), "rules": context.get("rules", {})}, ensure_ascii=False),
+                    "content": json.dumps({
+                        "agent": agent,
+                        "scope": context.get("scope", {}),
+                        "rules": context.get("rules", {}),
+                        "inventory": inventory,
+                    }, ensure_ascii=False),
                 },
             ],
             "temperature": 0.2,
