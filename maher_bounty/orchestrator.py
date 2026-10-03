@@ -4,6 +4,7 @@ import os
 import yaml
 from .model_adapter import LocalModelAdapter
 from .hypothesis_engine import build_hypotheses
+from .collaboration import build_waves, evidence_bus
 
 
 def load_agents():
@@ -57,25 +58,43 @@ def run(scope_path, rules_path, out_dir="reports", inventory_path=None):
     hypotheses = build_hypotheses(context_inventory)
     model = LocalModelAdapter()
 
+    agents = load_agents()
+    waves = build_waves(agents)
     results = []
-    for agent in load_agents():
-        results.append(model.analyze(agent, {
-            "scope": scope,
-            "rules": rules,
-            "inventory": context_inventory,
-            "hypotheses": hypotheses,
-            "research_method": {
-                "mode": "hypothesis_driven",
-                "principles": [
-                    "Prefer cross-surface inconsistencies over signature matching",
-                    "Correlate identity, object ownership, tenant boundaries and workflow state",
-                    "Compare API generations and alternate application routes",
-                    "Treat scanner output as evidence, not as a confirmed vulnerability",
-                    "Seek independent evidence before promoting a candidate finding",
-                    "Prioritize impact chains supported by observed application relationships",
-                ],
-            },
-        }))
+    wave_summary = []
+
+    for wave_index, wave in enumerate(waves, start=1):
+        prior_evidence = evidence_bus(results)
+        current = []
+        for agent in wave:
+            result = model.analyze(agent, {
+                "scope": scope,
+                "rules": rules,
+                "inventory": context_inventory,
+                "hypotheses": hypotheses,
+                "prior_agent_evidence": prior_evidence,
+                "research_method": {
+                    "mode": "collaborative_hypothesis_driven",
+                    "wave": wave_index,
+                    "principles": [
+                        "Prefer cross-surface inconsistencies over signature matching",
+                        "Correlate identity, object ownership, tenant boundaries and workflow state",
+                        "Compare API generations and alternate application routes",
+                        "Use earlier-agent evidence to refine or challenge hypotheses",
+                        "Treat scanner output as evidence, not as a confirmed vulnerability",
+                        "Seek independent evidence before promoting a candidate finding",
+                        "Prioritize impact chains supported by observed application relationships",
+                        "Explicitly flag contradictory evidence and likely false positives",
+                    ],
+                },
+            })
+            current.append(result)
+        results.extend(current)
+        wave_summary.append({
+            "wave": wave_index,
+            "agents": [r.get("agent") for r in current],
+            "shared_evidence_packets_after_wave": len(evidence_bus(results)),
+        })
 
     payload = {
         "scope": scope,
@@ -84,6 +103,7 @@ def run(scope_path, rules_path, out_dir="reports", inventory_path=None):
         "inventory_source": inventory.get("source_file"),
         "hypothesis_count": len(hypotheses),
         "hypotheses": hypotheses,
+        "collaboration_waves": wave_summary,
         "agent_count": len(results),
         "results": results,
     }
@@ -93,17 +113,20 @@ def run(scope_path, rules_path, out_dir="reports", inventory_path=None):
     md = [
         "# Maher Vulnerability Research Report",
         f"\nAgents: {len(results)}",
+        f"\nCollaboration waves: {len(waves)}",
         f"\nProgram: {scope.get('program', '')}",
         f"\nInventory: {counts.get('hosts', 0)} hosts / {counts.get('endpoints', 0)} endpoints / {counts.get('http', 0)} HTTP records",
         f"\nResearch hypotheses: {len(hypotheses)}",
         "\n## Hypothesis queue",
     ]
     md += [f"- **{h['priority'].upper()} / {h['type']}** — {h['reason']}" for h in hypotheses]
+    md.append("\n## Collaboration waves")
+    md += [f"- Wave {w['wave']}: {len(w['agents'])} agents; shared packets={w['shared_evidence_packets_after_wave']}" for w in wave_summary]
     md.append("\n## Agent passes")
     md += [f"- **{r['agent']}** — {r['status']}" for r in results]
     (out / "report.md").write_text("\n".join(md), encoding="utf-8")
 
     rows = "".join(f"<tr><td>{r['agent']}</td><td>{r['status']}</td></tr>" for r in results)
-    html = f'''<!doctype html><meta charset="utf-8"><title>Maher Report</title><h1>Maher Vulnerability Research Report</h1><p>Program: {scope.get("program", "")}</p><p>Agents: {len(results)}</p><p>Research hypotheses: {len(hypotheses)}</p><p>Inventory: {counts.get("hosts",0)} hosts / {counts.get("endpoints",0)} endpoints / {counts.get("http",0)} HTTP records</p><table><tr><th>Agent</th><th>Status</th></tr>{rows}</table>'''
+    html = f'''<!doctype html><meta charset="utf-8"><title>Maher Report</title><h1>Maher Vulnerability Research Report</h1><p>Program: {scope.get("program", "")}</p><p>Agents: {len(results)}</p><p>Collaboration waves: {len(waves)}</p><p>Research hypotheses: {len(hypotheses)}</p><p>Inventory: {counts.get("hosts",0)} hosts / {counts.get("endpoints",0)} endpoints / {counts.get("http",0)} HTTP records</p><table><tr><th>Agent</th><th>Status</th></tr>{rows}</table>'''
     (out / "report.html").write_text(html, encoding="utf-8")
     return payload
