@@ -1,0 +1,5 @@
+program: "Example Authorized Bug Bounty"
+assets:
+  - "https://example.com"
+out_of_scope: []
+notes: "Replace this example with the exact published program scope."

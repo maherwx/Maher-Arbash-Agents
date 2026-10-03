@@ -1,0 +1,1 @@
+{"project":"Maher-Vuln-Research","agent_count":95,"categories":{"scope":6,"recon":10,"web":12,"api":10,"auth":10,"access":6,"input":7,"logic":7,"client":7,"infra":7,"triage":7,"report":6},"reports":["report.html","report.md","report.json"]}
