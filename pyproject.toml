@@ -1,0 +1,13 @@
+[project]
+name = "maher-vuln-research"
+version = "0.1.0"
+description = "Local multi-agent bug bounty research orchestrator"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.scripts]
+maher-bounty = "maher_bounty.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
