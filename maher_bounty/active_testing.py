@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -8,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .scope_policy import filter_in_scope_urls, scope_target_urls
+from .tool_advisor import recommend_tools
 
 
 def _exec(cmd: list[str], *, timeout: int, output: Path | None = None) -> dict:
@@ -127,7 +129,7 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
     for scan_target in active_targets:
         parsed = urlparse(scan_target)
         host = parsed.hostname or ""
-        label = re.sub(r"[^A-Za-z0-9._-]", "_", parsed.netloc or host) or "target"
+        label = (re.sub(r"[^A-Za-z0-9._-]", "_", parsed.netloc or host) or "target") + "-" + hashlib.sha256(scan_target.encode("utf-8")).hexdigest()[:10]
         host_dir = root / "hosts" / label
         host_dir.mkdir(parents=True, exist_ok=True)
 
@@ -153,6 +155,7 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
         findings.extend(_dalfox_findings(dalfox_out, target or (active_targets[0] if active_targets else "")))
 
     unique = _dedupe(findings)
+    adaptive_tool_plan = recommend_tools(inventory, include_active=True)
     summary = {
         "seed_target": target,
         "targets": active_targets,
@@ -165,6 +168,7 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
         "raw_findings": len(findings),
         "unique_findings": len(unique),
         "scope_review": scope_review,
+        "adaptive_tool_plan": adaptive_tool_plan,
         "runs": runs,
         "findings": unique,
     }
