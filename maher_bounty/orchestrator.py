@@ -111,7 +111,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             if seeds:
                 print(f"[recon] Collecting inventory for {len(seeds)} scope seed(s)", flush=True)
                 inventory = _collect_scope_inventory(scope, rules, target, out / "recon")
-        active_testing = {}
+        active_testing = {"status": "skipped", "reason": "allow_active_discovery=false", "findings": []}
         if rules.get("allow_active_discovery", False):
             print("[active] Testing all authorized assets discovered in scope", flush=True)
             active_testing = run_active_testing(target, inventory, out / "active", scope=scope)
