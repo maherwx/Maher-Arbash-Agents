@@ -122,9 +122,9 @@ def run_active_testing(target: str, inventory: dict, out_dir: str | Path, *, sco
     runs = []
     findings = []
 
-    # Crawl only the explicitly authorized starting host.
+    # Restrict crawling to the exact authorized FQDN; Katana defaults to the root domain and sibling subdomains.
     katana_out = root / "katana.txt"
-    runs.append(_exec(["katana", "-u", normalized_target, "-silent", "-d", "3", "-jc"], timeout=90, output=katana_out))
+    runs.append(_exec(["katana", "-u", normalized_target, "-silent", "-d", "3", "-jc", "-fs", "fqdn"], timeout=90, output=katana_out))
 
     # Template-driven checks produce structured evidence suitable for correlation.
     nuclei_out = root / "nuclei.jsonl"
