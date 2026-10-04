@@ -72,8 +72,7 @@ def merge_ir(*documents: dict, semantic_model: dict | None = None) -> dict:
             semantic=semantic_lookup.get((fn.get("id"), callee))
             if semantic:
                 target=semantic.get("resolved")
-                candidates=semantic.get("candidates") or []
-                confidence=float(candidates[0].get("confidence") or 0.5) if candidates else 0.5
+                confidence=float(semantic.get("confidence") or 0.5)
                 key=(fn["id"],target,callee)
                 if key not in seen:
                     seen.add(key)
@@ -86,6 +85,7 @@ def merge_ir(*documents: dict, semantic_model: dict | None = None) -> dict:
                     seen.add(key)
                     call_edges.append({"from":fn["id"],"to":target,"kind":"calls","symbol":callee,"confidence":0.75,"resolution":"unique-name"})
             else:
-                unresolved.append({"from":fn["id"],"symbol":callee,"candidate_count":len(candidates)})
+                candidate_ids=[str(x.get("id")) for x in candidates if x.get("id")]
+                unresolved.append({"from":fn["id"],"caller":fn["id"],"symbol":callee,"candidate_count":len(candidate_ids),"candidates":candidate_ids})
     route_functions=[fn for fn in functions if fn.get("route_bindings")]
-    return {"schema_version":"1.2","function_count":len(functions),"languages":sorted({fn.get("language") for fn in functions}),"functions":functions,"call_edges":call_edges,"unresolved_calls":unresolved,"route_function_count":len(route_functions),"route_functions":route_functions,"semantic_resolution_used":bool(semantic_model)}
+    return {"schema_version":"1.3","function_count":len(functions),"languages":sorted({fn.get("language") for fn in functions}),"functions":functions,"call_edges":call_edges,"unresolved_calls":unresolved,"route_function_count":len(route_functions),"route_functions":route_functions,"semantic_resolution_used":bool(semantic_model)}
