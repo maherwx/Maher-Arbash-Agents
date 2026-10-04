@@ -11,3 +11,7 @@ maher-bounty = "maher_bounty.cli:main"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["maher_bounty*"]
+exclude = ["engine*", "analyzers*", "tests*"]
