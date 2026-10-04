@@ -105,7 +105,8 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
     endpoints = [row.get("value") for row in inventory.get("endpoints", []) if isinstance(row, dict) and row.get("value")]
     assets = scope.get("assets") if isinstance(scope.get("assets"), list) else []
     active_targets, target_rejections = scope_target_urls(scope, inventory, target=target)
-    candidates = [*active_targets, *([target] if target else []), *endpoints]
+    target_url = [target] if target and "://" in target else []
+    candidates = [*active_targets, *target_url, *endpoints]
     fallback_target = target if not assets else None
     allowed_urls, rejected_urls = filter_in_scope_urls(candidates, scope, target=fallback_target)
     rejected_urls = list(dict.fromkeys([*rejected_urls, *target_rejections]))
