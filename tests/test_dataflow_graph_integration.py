@@ -30,7 +30,7 @@ class DataflowGraphIntegrationTests(unittest.TestCase):
 
         ranked=rank_analysis_targets(dataflow_graph=flow)
         self.assertEqual(ranked["target_count"],1)
-        self.assertIn("interprocedural route-reachable dataflow",ranked["targets"][0]["reasons"])
+        self.assertIn("confidence-weighted interprocedural dataflow",ranked["targets"][0]["reasons"])
         self.assertGreater(ranked["targets"][0]["score"],0)
 
 
