@@ -53,6 +53,24 @@ def from_structural_ir(result: dict) -> dict:
     return {"language":result.get("language","unknown"),"functions":list(result.get("functions",[]))}
 
 
+def _semantic_confidence(item: dict) -> float:
+    """Return the resolver's confidence without inventing a stronger score.
+
+    Older semantic models stored confidence on the winning candidate, while
+    newer models may store it directly on the resolution. Preserve either
+    representation and fall back conservatively only when neither exists.
+    """
+    direct=item.get("confidence")
+    if direct is not None:
+        return float(direct)
+    resolved=item.get("resolved")
+    for candidate in item.get("candidates", []):
+        candidate_id=candidate.get("target", candidate.get("id"))
+        if candidate_id==resolved and candidate.get("confidence") is not None:
+            return float(candidate["confidence"])
+    return 0.5
+
+
 def merge_ir(*documents: dict, semantic_model: dict | None = None) -> dict:
     functions=[]
     for doc in documents:
@@ -72,7 +90,7 @@ def merge_ir(*documents: dict, semantic_model: dict | None = None) -> dict:
             semantic=semantic_lookup.get((fn.get("id"), callee))
             if semantic:
                 target=semantic.get("resolved")
-                confidence=float(semantic.get("confidence") or 0.5)
+                confidence=_semantic_confidence(semantic)
                 key=(fn["id"],target,callee)
                 if key not in seen:
                     seen.add(key)
