@@ -138,9 +138,10 @@ def scope_target_urls(scope: dict | None, inventory: dict | None, *, target: str
     for raw in asset_values:
         parsed = _parsed_rule(raw)
         if parsed and not parsed[1]:
-            candidates.append(raw)
+            candidates.append(raw if "://" in raw else f"{parsed[2]}://{raw}")
     if target:
-        candidates.append(target)
+        parsed_target = _parsed_rule(target)
+        candidates.append(target if "://" in target else (f"{parsed_target[2]}://{target}" if parsed_target else target))
     for row in inventory.get("hosts", []):
         value = row if isinstance(row, str) else row.get("value") or row.get("host") if isinstance(row, dict) else None
         if isinstance(value, str) and value.strip() and not value.strip().startswith("*."):
