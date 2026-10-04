@@ -116,6 +116,8 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             print("[active] Testing all authorized assets discovered in scope", flush=True)
             active_testing = run_active_testing(target, inventory, out / "active", scope=scope)
             store.checkpoint(run_id, "active_testing", active_testing)
+        else:
+            print("[active] SKIPPED: rules.yaml has allow_active_discovery=false; reports contain hypotheses only.", flush=True)
 
         print("[intelligence] Building application model and evidence graph", flush=True)
         intelligence_target = target or inventory.get("target") or ""
