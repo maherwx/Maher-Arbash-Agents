@@ -54,7 +54,7 @@ def _run_loaded(scope:dict,rules:dict,out_dir="reports",inventory_path=None,targ
             recon_dir=out/"recon"; inventory=collect_target_inventory(target,recon_dir,rules=rules); inventory["source_file"]=str(recon_dir/"inventory.json")
             if rules.get("allow_active_discovery",False):
                 print("[active] Starting authorized non-destructive testing",flush=True)
-                active_testing=run_active_testing(target,inventory,out/"active"); store.checkpoint(run_id,"active_testing",active_testing)
+                active_testing=run_active_testing(target,inventory,out/"active",scope=scope); store.checkpoint(run_id,"active_testing",active_testing)
             else: print("[active] Disabled by rules",flush=True)
 
         print("[intelligence] Building application model and evidence graph",flush=True)
