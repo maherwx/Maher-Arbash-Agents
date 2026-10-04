@@ -7,6 +7,9 @@ from .hypothesis_engine import build_hypotheses
 from .collaboration import build_waves, evidence_bus
 from .research_intelligence import architecture_map, review_findings, research_directives
 from .reporting import build_report_bundle
+from .knowledge_graph import build_application_graph
+from .persistence import ResearchStore
+from .native_engines import run_native_engines
 
 
 def load_agents():
@@ -38,13 +41,7 @@ def load_inventory(scope, explicit_path=None):
 
 
 def compact_inventory(inventory, max_items=250):
-    return {
-        "counts": inventory.get("counts", {}),
-        "hosts": inventory.get("hosts", [])[:max_items],
-        "endpoints": inventory.get("endpoints", [])[:max_items],
-        "http": inventory.get("http", [])[:max_items],
-        "source_file": inventory.get("source_file"),
-    }
+    return {"counts": inventory.get("counts", {}), "hosts": inventory.get("hosts", [])[:max_items], "endpoints": inventory.get("endpoints", [])[:max_items], "http": inventory.get("http", [])[:max_items], "source_file": inventory.get("source_file")}
 
 
 def run(scope_path, rules_path, out_dir="reports", inventory_path=None):
@@ -53,57 +50,59 @@ def run(scope_path, rules_path, out_dir="reports", inventory_path=None):
     if not rules.get("authorization_required", True):
         raise SystemExit("rules.yaml must keep authorization_required=true")
 
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    inventory = load_inventory(scope, inventory_path)
-    context_inventory = compact_inventory(inventory)
-    hypotheses = build_hypotheses(context_inventory)
-    topology = architecture_map(context_inventory)
-    directives = research_directives()
-    model = LocalModelAdapter()
+    out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
+    store = ResearchStore()
+    run_id = store.create_run(scope)
+    try:
+        inventory = load_inventory(scope, inventory_path)
+        context_inventory = compact_inventory(inventory)
+        hypotheses = build_hypotheses(context_inventory)
+        topology = architecture_map(context_inventory)
+        graph = build_application_graph(context_inventory, hypotheses)
+        directives = research_directives()
+        store.checkpoint(run_id, "inventory", context_inventory)
+        store.checkpoint(run_id, "hypotheses", hypotheses)
+        store.checkpoint(run_id, "application_graph", graph)
 
-    agents = load_agents()
-    waves = build_waves(agents)
-    results = []
-    wave_summary = []
+        native = {}
+        source_file = inventory.get("source_file")
+        if source_file and Path(source_file).is_file():
+            native = run_native_engines(source_file)
+            store.checkpoint(run_id, "native_engines", native)
 
-    for wave_index, wave in enumerate(waves, start=1):
-        prior_evidence = evidence_bus(results)
-        current = []
-        for agent in wave:
-            result = model.analyze(agent, {
-                "scope": scope,
-                "rules": rules,
-                "inventory": context_inventory,
-                "architecture_topology": topology,
-                "hypotheses": hypotheses,
-                "prior_agent_evidence": prior_evidence,
-                "research_directives": directives,
-                "research_method": {
-                    "mode": "collaborative_hypothesis_driven",
-                    "wave": wave_index,
-                    "principles": directives["directives"],
-                },
-            })
-            current.append(result)
-        results.extend(current)
-        wave_summary.append({
-            "wave": wave_index,
-            "agents": [r.get("agent") for r in current],
-            "shared_evidence_packets_after_wave": len(evidence_bus(results)),
-        })
+        model = LocalModelAdapter()
+        agents = load_agents(); waves = build_waves(agents)
+        results = []; wave_summary = []
+        for wave_index, wave in enumerate(waves, start=1):
+            prior_evidence = evidence_bus(results)
+            current = []
+            for agent in wave:
+                result = model.analyze(agent, {
+                    "scope": scope, "rules": rules, "inventory": context_inventory,
+                    "architecture_topology": topology, "application_graph": graph,
+                    "native_engine_analysis": native, "hypotheses": hypotheses,
+                    "prior_agent_evidence": prior_evidence, "research_directives": directives,
+                    "research_method": {"mode": "collaborative_hypothesis_driven", "wave": wave_index, "principles": directives["directives"]},
+                })
+                current.append(result)
+                store.add_evidence(run_id, result.get("agent", "unknown"), "agent_result", result)
+            results.extend(current)
+            wave_summary.append({"wave": wave_index, "agents": [r.get("agent") for r in current], "shared_evidence_packets_after_wave": len(evidence_bus(results))})
+            store.checkpoint(run_id, f"wave_{wave_index}", current)
 
-    reviewed_findings = review_findings(results)
-    payload = {
-        "scope": scope,
-        "rules": rules,
-        "inventory_counts": inventory.get("counts", {}),
-        "inventory_source": inventory.get("source_file"),
-        "hypothesis_count": len(hypotheses),
-        "hypotheses": hypotheses,
-        "collaboration_waves": wave_summary,
-        "agent_count": len(results),
-        "results": results,
-    }
-    build_report_bundle(out, payload, reviewed_findings, topology)
-    return payload
+        reviewed_findings = review_findings(results)
+        store.save_findings(run_id, reviewed_findings)
+        payload = {
+            "run_id": run_id, "scope": scope, "rules": rules,
+            "inventory_counts": inventory.get("counts", {}), "inventory_source": source_file,
+            "hypothesis_count": len(hypotheses), "hypotheses": hypotheses,
+            "application_graph_stats": graph.get("stats", {}), "native_engines": native,
+            "collaboration_waves": wave_summary, "agent_count": len(results), "results": results,
+        }
+        build_report_bundle(out, payload, reviewed_findings, topology)
+        (out / "application-graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
+        store.finish(run_id)
+        return payload
+    except Exception:
+        store.finish(run_id, "failed")
+        raise
