@@ -63,7 +63,10 @@ class ActiveTestingScopeTests(unittest.TestCase):
         ])
         katana_targets = [cmd[cmd.index("-u") + 1] for cmd in commands if cmd[0] == "katana"]
         self.assertEqual(katana_targets, result["targets"])
-        nuclei_targets = [cmd[cmd.index("-u") + 1] for cmd in commands if cmd[0] == "nuclei"]
+        nuclei_runs = [cmd for cmd in commands if cmd[0] == "nuclei"]
+        self.assertEqual(len(nuclei_runs), 1)
+        nuclei_target_file = Path(nuclei_runs[0][nuclei_runs[0].index("-l") + 1])
+        nuclei_targets = nuclei_target_file.read_text(encoding="utf-8").splitlines()
         self.assertIn("https://app.example.test/login", nuclei_targets)
         self.assertIn("https://api.example.test/v1", nuclei_targets)
         self.assertEqual(result["scope_review"]["rejected_url_count"], 3)
