@@ -35,4 +35,4 @@ maher-bounty run --scope /path/to/your-program-scope.yaml --rules examples/rules
 maher-bounty auto-run --target "app.in-scope-domain.test" --authorized
 ```
 
-إذا لم تُفعّل `allow_active_discovery`، يوضح التقرير أن الفحص النشط تم تخطيه؛ الجرد والفرضيات وحدهما لا يمثلان نتائج ثغرات مؤكدة.
+إذا لم يذكر ملف القواعد `allow_active_discovery`، فإن `--authorized` يفعّل الفحوص؛ أما القيمة `false` الصريحة فتخطيها ويظهر ذلك في التقرير. الجرد والفرضيات وحدهما لا يمثلان نتائج ثغرات مؤكدة.
