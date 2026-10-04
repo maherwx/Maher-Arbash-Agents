@@ -127,8 +127,8 @@ def _tool_coverage(inventory: dict, runs: list[dict]) -> list[dict]:
         item = dict(recommendation)
         command = item.get("command")
         if command and command in statuses:
-            item["execution_status"] = "executed"
             item["run_statuses"] = statuses[command]
+            item["execution_status"] = "skipped" if all(status == "skipped" for status in statuses[command]) else "executed"
         elif item.get("mode") in {"manual_proxy_report_import", "static"}:
             item["execution_status"] = "requires_input"
             item["reason"] = "manual traffic/report or source repository is required"
@@ -146,28 +146,44 @@ def _in_scope_unique(values, scope: dict, *, target: str | None = None) -> list[
     return allowed
 
 
-def _directory_discovery(scan_target: str, host_dir: Path, runs: list[dict]) -> None:
+def _directory_discovery(scan_target: str, host_dir: Path, runs: list[dict]) -> list[str]:
     parsed = urlparse(scan_target)
     if parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
         runs.append({"tool": "ffuf/gobuster", "status": "skipped", "target": scan_target, "reason": "only origin URLs are eligible for content discovery"})
-        return
+        return []
     wordlist = host_dir / "safe-content-paths.txt"
     wordlist.write_text("\n".join(SAFE_CONTENT_PATHS) + "\n", encoding="utf-8")
+    output_urls = []
     if shutil.which("ffuf"):
+        output = host_dir / "ffuf.json"
         runs.append(_exec([
             "ffuf", "-w", str(wordlist), "-u", scan_target.rstrip("/") + "/FUZZ",
             "-rate", "3", "-t", "2", "-maxtime", "30", "-noninteractive",
-            "-of", "json", "-o", str(host_dir / "ffuf.json"),
+            "-of", "json", "-o", str(output),
             "-mc", "200,204,301,302,307,401,403",
         ], timeout=45))
+        if output.exists():
+            try:
+                data = json.loads(output.read_text(encoding="utf-8", errors="ignore"))
+                output_urls.extend(row.get("url") for row in data.get("results", []) if isinstance(row, dict) and row.get("url"))
+            except (OSError, json.JSONDecodeError):
+                pass
     elif shutil.which("gobuster"):
+        output = host_dir / "gobuster.txt"
         runs.append(_exec([
             "gobuster", "dir", "-u", scan_target, "-w", str(wordlist),
             "--threads", "2", "--delay", "300ms", "--timeout", "5s",
-            "--no-error", "--quiet", "-o", str(host_dir / "gobuster.txt"),
+            "--no-error", "--quiet", "-o", str(output),
         ], timeout=45))
+        if output.exists():
+            for line in output.read_text(encoding="utf-8", errors="ignore").splitlines():
+                match = re.search(r"Found:\s+(\S+)", line)
+                if match:
+                    path = match.group(1)
+                    output_urls.append(scan_target.rstrip("/") + "/" + path.lstrip("/"))
     else:
         runs.append({"tool": "ffuf/gobuster", "status": "missing", "reason": "neither binary is installed"})
+    return output_urls
 
 
 def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path, *, scope: dict | None = None) -> dict:
@@ -189,6 +205,13 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
     (root / "scope-review.json").write_text(json.dumps(scope_review, ensure_ascii=False, indent=2), encoding="utf-8")
     runs, findings = [], []
     discovered_urls = list(allowed_urls)
+    agent_decisions = [{
+        "stage": "scope_gate",
+        "decision": "admit only exact in-scope HTTP(S) URLs",
+        "seed_target": target,
+        "allowed_count": len(allowed_urls),
+        "rejected_count": len(rejected_urls),
+    }]
 
     for scan_target in active_targets:
         parsed = urlparse(scan_target)
@@ -197,13 +220,23 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
         host_dir = root / "hosts" / label
         host_dir.mkdir(parents=True, exist_ok=True)
 
+        before_count = len(discovered_urls)
         katana_out = host_dir / "katana.txt"
-        runs.append(_exec(["katana", "-u", scan_target, "-silent", "-d", "3", "-jc", "-fs", "fqdn"], timeout=90, output=katana_out))
+        crawl_run = _exec(["katana", "-u", scan_target, "-silent", "-d", "3", "-jc", "-fs", "fqdn"], timeout=90, output=katana_out)
+        runs.append(crawl_run)
         if katana_out.exists():
             crawled = [line.strip() for line in katana_out.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
             discovered_urls.extend(_in_scope_unique(crawled, scope, target=fallback_target))
-
-        _directory_discovery(scan_target, host_dir, runs)
+        directory_urls = _directory_discovery(scan_target, host_dir, runs)
+        discovered_urls.extend(_in_scope_unique(directory_urls, scope, target=fallback_target))
+        agent_decisions.append({
+            "stage": "web_discovery",
+            "target": scan_target,
+            "tools": ["katana", "ffuf" if shutil.which("ffuf") else "gobuster"],
+            "crawl_status": crawl_run.get("status"),
+            "new_in_scope_urls": max(0, len(discovered_urls) - before_count),
+            "next": "classify discovered routes and choose validators",
+        })
         nikto_out = host_dir / "nikto.txt"
         runs.append(_exec(["nikto", "-h", scan_target, "-nointeractive"], timeout=120, output=nikto_out))
         findings.extend(_nikto_findings(nikto_out, scan_target))
@@ -218,7 +251,23 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
     discovered_urls = _in_scope_unique(discovered_urls, scope, target=fallback_target)
     target_file = root / "targets.txt"
     target_file.write_text("\n".join(discovered_urls) + ("\n" if discovered_urls else ""), encoding="utf-8")
+    parsed_routes = [urlparse(value) for value in discovered_urls]
+    parameter_urls = [value for value in discovered_urls if urlparse(value).query]
+    javascript_urls = [value for value in discovered_urls if urlparse(value).path.lower().endswith((".js", ".mjs"))]
+    api_urls = [value for value in discovered_urls if any(token in urlparse(value).path.lower() for token in ("/api", "graphql", "openapi", "swagger")) or urlparse(value).path.lower().endswith(".json")]
+    route_types = {
+        "urls": len(discovered_urls),
+        "parameterized": len(parameter_urls),
+        "javascript": len(javascript_urls),
+        "api_like": len(api_urls),
+    }
     if discovered_urls:
+        agent_decisions.append({
+            "stage": "route_analysis",
+            "decision": "run Nuclei across all admitted URLs",
+            "reason": "scope-filtered inventory and crawler results are available",
+            "route_types": route_types,
+        })
         nuclei_out = root / "nuclei.jsonl"
         runs.append(_exec([
             "nuclei", "-l", str(target_file), "-jsonl", "-severity", "info,low,medium,high,critical",
@@ -226,13 +275,38 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
             "-o", str(nuclei_out),
         ], timeout=240))
         findings.extend(_nuclei_findings(nuclei_out))
-        dalfox_out = root / "dalfox.txt"
-        runs.append(_exec(["dalfox", "file", str(target_file), "--silence"], timeout=180, output=dalfox_out))
-        findings.extend(_dalfox_findings(dalfox_out, target or discovered_urls[0]))
+        if parameter_urls or javascript_urls:
+            dalfox_out = root / "dalfox.txt"
+            dalfox_file = root / "dalfox-targets.txt"
+            dalfox_targets = list(dict.fromkeys([*parameter_urls, *javascript_urls]))
+            dalfox_file.write_text("\n".join(dalfox_targets) + "\n", encoding="utf-8")
+            agent_decisions.append({
+                "stage": "xss_triage",
+                "decision": "run Dalfox on parameterized and JavaScript URLs",
+                "reason": "route classifier found XSS-relevant inputs",
+                "url_count": len(dalfox_targets),
+            })
+            runs.append(_exec(["dalfox", "file", str(dalfox_file), "--silence"], timeout=180, output=dalfox_out))
+            findings.extend(_dalfox_findings(dalfox_out, target or dalfox_targets[0]))
+        else:
+            agent_decisions.append({
+                "stage": "xss_triage",
+                "decision": "skip Dalfox",
+                "reason": "no parameterized or JavaScript URLs were discovered",
+            })
+            runs.append({"tool": "dalfox", "status": "skipped", "reason": "no parameterized or JavaScript URLs were discovered"})
+    else:
+        agent_decisions.append({
+            "stage": "route_analysis",
+            "decision": "skip URL validators",
+            "reason": "no in-scope URLs survived scope filtering",
+        })
 
     unique = _dedupe(findings)
     adaptive_tool_plan = recommend_tools(inventory, include_active=True)
     summary = {
+        "adaptive_coordinator": {"name": "scope-aware-tool-coordinator", "mode": "deterministic_evidence_driven", "decisions": agent_decisions},
+        "route_types": route_types if discovered_urls else {"urls": 0, "parameterized": 0, "javascript": 0, "api_like": 0},
         "seed_target": target, "targets": active_targets, "target_count": len(active_targets),
         "discovered_in_scope_url_count": len(discovered_urls), "discovered_in_scope_urls": discovered_urls,
         "rejected_url_count": len(rejected_urls), "registered": len(runs),
