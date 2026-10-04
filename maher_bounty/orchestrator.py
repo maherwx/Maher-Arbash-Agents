@@ -13,7 +13,8 @@ from .knowledge_graph import build_application_graph
 from .persistence import ResearchStore
 from .native_engines import run_native_engines
 from .tool_orchestration import collect_target_inventory
-from .active_testing import run_active_testing
+from .active_testing import run_active_testing, _dedupe
+from .agent_tool_router import run_agent_tool_requests
 from .scope_policy import scope_seed_targets
 from .advanced_analysis import build_application_intelligence, normalize_evidence, validate_evidence, build_agent_workstreams, write_advanced_artifacts
 
@@ -181,10 +182,57 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             wave_summary.append({"wave": wave_index, "agents": [r.get("agent") for r in current], "shared_evidence_packets_after_wave": len(evidence_bus(results))})
             store.checkpoint(run_id, f"wave_{wave_index}", current)
 
+        followup_summary = {"mode": "not_run", "runs": [], "findings": [], "decisions": []}
+        if active_enabled and model.enabled:
+            followup_summary = run_agent_tool_requests(
+                results,
+                active_testing.get("discovered_in_scope_urls", []),
+                out / "active" / "agent-followups",
+                scope=scope,
+            )
+            active_testing["agent_tool_followups"] = followup_summary
+            if followup_summary.get("findings"):
+                active_testing["findings"] = _dedupe([
+                    *active_testing.get("findings", []),
+                    *followup_summary["findings"],
+                ])
+                normalized = normalize_evidence(active_testing)
+                validation = validate_evidence(normalized)
+                workstreams = build_agent_workstreams(intelligence, validation)
+                write_advanced_artifacts(out / "intelligence", intelligence, validation, workstreams)
+                store.checkpoint(run_id, "agent_tool_followups", followup_summary)
+                store.checkpoint(run_id, "validated_evidence_after_followups", validation)
+                review_ids = {"evidence_reviewer", "false_positive_reviewer", "reproducibility_reviewer"}
+                prior_evidence = evidence_bus(results)
+                followup_reviews = []
+                for reviewer in agents:
+                    if reviewer.get("id") not in review_ids:
+                        continue
+                    review = model.analyze(reviewer, {
+                        "scope": scope, "rules": rules, "inventory": context_inventory,
+                        "architecture_topology": topology, "application_graph": graph,
+                        "application_intelligence": intelligence, "agent_workstreams": workstreams,
+                        "validated_evidence": validation, "native_engine_analysis": native,
+                        "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
+                        "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
+                        "research_directives": directives,
+                        "research_method": {"mode": "followup_evidence_review", "principles": directives["directives"]},
+                    })
+                    results.append(review)
+                    followup_reviews.append(review)
+                    store.add_evidence(run_id, review.get("agent", "unknown"), "followup_review", review)
+                store.checkpoint(run_id, "followup_reviews", followup_reviews)
+        else:
+            active_testing["agent_tool_followups"] = {
+                **followup_summary,
+                "reason": "active testing or the local model is not enabled",
+            }
+
         agent_status_counts = Counter(str(row.get("status", "unknown")) for row in results)
         agent_execution = {
             "mode": model.mode,
             "configured_roles": len(agents),
+            "analysis_calls": len(results),
             "successful_model_analyses": sum(1 for row in results if row.get("status") not in {"planned", "model_error"}),
             "planning_only": agent_status_counts.get("planned", 0),
             "model_errors": agent_status_counts.get("model_error", 0),
