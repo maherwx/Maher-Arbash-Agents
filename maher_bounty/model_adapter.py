@@ -86,6 +86,7 @@ class LocalModelAdapter:
                     "Set MAHER_MODEL_URL and MAHER_MODEL_ID to enable model-assisted analysis."
                 ],
                 "next_checks": [agent.get("mission", "")],
+                "tool_requests": [],
             }
 
         payload = {
@@ -138,6 +139,7 @@ class LocalModelAdapter:
             result.setdefault("candidate_findings", [])
             result.setdefault("evidence_notes", [])
             result.setdefault("next_checks", [])
+            result.setdefault("tool_requests", [])
             return result
         except (urllib.error.URLError, TimeoutError, KeyError, ValueError, json.JSONDecodeError) as exc:
             return {
