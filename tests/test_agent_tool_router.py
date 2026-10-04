@@ -12,7 +12,7 @@ class AgentToolRouterTests(unittest.TestCase):
         outside = "https://attacker.example/path"
         results = [
             {"agent": "xss_reviewer", "tool_requests": [
-                {"tool": "dalfox", "targets": [safe, outside], "reason": "query parameter observed"},
+                {"tool": "dalfox", "targets": [safe, outside, "https://app.example.test/unseen"], "reason": "query parameter observed"},
                 {"tool": "shell", "targets": [safe], "reason": "not allowlisted"},
             ]}
         ]
