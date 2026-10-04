@@ -31,8 +31,8 @@
 ملف المثال يفعّل الفحوص النشطة ضمن النطاق المحدد. شغّلها صراحةً مع تأكيد التفويض:
 
 ```bash
-maher-bounty run --scope examples/scope.yaml --rules examples/rules.yaml --authorized
-maher-bounty auto-run --target <authorized-target> --authorized
+maher-bounty run --scope /path/to/your-program-scope.yaml --rules examples/rules.yaml --authorized
+maher-bounty auto-run --target "app.in-scope-domain.test" --authorized
 ```
 
 إذا لم تُفعّل `allow_active_discovery`، يوضح التقرير أن الفحص النشط تم تخطيه؛ الجرد والفرضيات وحدهما لا يمثلان نتائج ثغرات مؤكدة.
