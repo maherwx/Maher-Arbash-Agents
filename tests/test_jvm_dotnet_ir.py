@@ -31,7 +31,7 @@ class UsersController {
             self.assertEqual(set(merged['languages']),{'java','csharp'})
             self.assertGreaterEqual(merged['route_function_count'],2)
             self.assertGreaterEqual(len(merged['call_edges']),2)
-            self.assertEqual(merged['schema_version'],'1.2')
+            self.assertEqual(merged['schema_version'],'1.3')
 
 
 if __name__=='__main__':
