@@ -25,3 +25,14 @@
 - تشغيل Windows أو Linux/Kali.
 - لا يحتاج API سحابي.
 - ملف `scope.yaml` يحدد النطاق المصرح به.
+
+## تشغيل الفحوص النشطة ضمن التفويض
+
+ملف المثال يفعّل الفحوص النشطة ضمن النطاق المحدد. شغّلها صراحةً مع تأكيد التفويض:
+
+```bash
+maher-bounty run --scope examples/scope.yaml --rules examples/rules.yaml --authorized
+maher-bounty auto-run --target <authorized-target> --authorized
+```
+
+إذا لم تُفعّل `allow_active_discovery`، يوضح التقرير أن الفحص النشط تم تخطيه؛ الجرد والفرضيات وحدهما لا يمثلان نتائج ثغرات مؤكدة.
