@@ -17,7 +17,7 @@ class SemanticIRIntegrationTests(unittest.TestCase):
 
         semantics=build_semantic_model(baseline)
         enriched=merge_ir(doc,semantic_model=semantics)
-        self.assertEqual(enriched["schema_version"],"1.2")
+        self.assertEqual(enriched["schema_version"],"1.3")
         self.assertEqual(len(enriched["call_edges"]),1)
         edge=enriched["call_edges"][0]
         self.assertEqual(edge["to"],"fn:java")
