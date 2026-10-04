@@ -129,18 +129,26 @@ def main():
         active = result.get("active_testing", {})
         status = active.get("status", "completed" if active else "skipped")
         findings = active.get("unique_findings", len(active.get("findings", [])))
-        print(f"Completed {result['agent_count']} agent passes; active_testing={status}; findings={findings}. Reports: {a.out}")
+        validation = result.get("validated_evidence", {}).get("counts", {})
+        print(
+            f"Completed {result['agent_count']} agent passes; active_testing={status}; "
+            f"candidate_findings={findings}; evidence_backed={validation.get('evidence_backed', 0)}; "
+            f"needs_review={validation.get('needs_review', 0)}. Reports: {a.out}"
+        )
         return
     if a.cmd == "auto-run":
         result = run_target(a.target, a.rules, a.out, authorized=a.authorized)
         active = result.get("active_testing", {})
+        validation = result.get("validated_evidence", {}).get("counts", {})
         print(json.dumps({
             "target": a.target,
             "inventory_counts": result.get("inventory_counts", {}),
             "agent_count": result.get("agent_count", 0),
             "active_discovery_enabled": result.get("tool_plan", {}).get("active_discovery_enabled", False),
             "active_testing_status": active.get("status", "completed" if active else "skipped"),
-            "findings_count": active.get("unique_findings", len(active.get("findings", []))),
+            "candidate_findings_count": active.get("unique_findings", len(active.get("findings", []))),
+            "evidence_backed_findings_count": validation.get("evidence_backed", 0),
+            "needs_review_count": validation.get("needs_review", 0),
             "missing_tools": active.get("missing", 0),
             "out": a.out,
         }, indent=2))
