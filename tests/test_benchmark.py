@@ -9,10 +9,10 @@ class BenchmarkTests(unittest.TestCase):
     def test_default_benchmark_passes_and_reports_quality(self):
         with tempfile.TemporaryDirectory() as td:
             result=run_benchmark(Path(td)/"bench")
-            self.assertEqual(result["case_count"],14)
+            self.assertEqual(result["case_count"],50)
             self.assertEqual(result["failed"],0)
             self.assertEqual(result["pass_rate"],1.0)
-            self.assertEqual(result["schema_version"],"1.4")
+            self.assertEqual(result["schema_version"],"1.5")
             for metric in ("precision","recall","specificity","false_positive_rate"):
                 self.assertIn(metric,result["quality"])
             self.assertGreaterEqual(result["quality"]["precision"],0.8)
@@ -29,6 +29,9 @@ class BenchmarkTests(unittest.TestCase):
             self.assertFalse(ordinary["classification"]["observed_signal"])
             self.assertEqual(same["observed"]["workflow_divergences"],0)
             self.assertGreaterEqual(workflow["observed"]["workflow_divergences"],1)
+            scaled=[x for x in result["results"] if x["name"].startswith("scaled_negative_")]
+            self.assertEqual(len(scaled),36)
+            self.assertTrue(all(x["passed"] for x in scaled))
             self.assertTrue((Path(td)/"bench"/"benchmark-summary.json").exists())
 
 
