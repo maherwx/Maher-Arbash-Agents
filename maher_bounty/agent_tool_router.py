@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from urllib.parse import urlparse
@@ -109,7 +108,7 @@ def run_agent_tool_requests(
                 "-rate-limit", "3", "-concurrency", "2", "-timeout", "10",
                 "-retries", "1", "-exclude-tags", "dos,intrusive",
                 "-o", str(output),
-            ], timeout=180, output=output))
+            ], timeout=180))
             findings.extend(_nuclei_findings(output))
         else:
             runs.append({"tool": "nuclei", "status": "missing", "reason": "agent-requested nuclei follow-up; binary not installed"})
