@@ -13,13 +13,13 @@ from .scope_policy import is_in_scope_url
 PASSIVE_TOOLS = ("subfinder", "assetfinder", "waybackurls", "gau", "httpx", "whatweb", "wafw00f")
 ACTIVE_DISCOVERY_TOOLS = ("dnsx", "katana", "tlsx", "nmap", "naabu", "ffuf", "gobuster", "nikto", "nuclei", "dalfox", "alterx", "hakrawler")
 PASSIVE_TIMEOUTS = {
-    "subfinder": 25,
-    "assetfinder": 20,
-    "waybackurls": 20,
-    "gau": 25,
-    "httpx": 30,
-    "whatweb": 20,
-    "wafw00f": 20,
+    "subfinder": 90,
+    "assetfinder": 45,
+    "waybackurls": 60,
+    "gau": 90,
+    "httpx": 60,
+    "whatweb": 45,
+    "wafw00f": 45,
 }
 
 
@@ -59,9 +59,12 @@ def _run(cmd: list[str], *, stdout_path: Path | None = None, timeout: int = 30) 
         status = "ok" if cp.returncode == 0 else "nonzero"
         print(f"[tool] {executable} {status}", flush=True)
         return {"tool": executable, "status": status, "returncode": cp.returncode, "stderr": (cp.stderr or "")[-2000:], "command": cmd}
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        stderr = exc.stderr or ""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
         print(f"[tool] {executable} timed out; continuing", flush=True)
-        return {"tool": executable, "status": "timeout", "command": cmd}
+        return {"tool": executable, "status": "timeout", "command": cmd, "stderr": str(stderr)[-2000:]}
 
 
 def plan_tools(target: str, rules: dict | None = None) -> dict:
