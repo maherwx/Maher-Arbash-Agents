@@ -90,11 +90,19 @@ def compact_inventory(inventory, max_items=250):
     return {"counts": inventory.get("counts", {}), "hosts": inventory.get("hosts", [])[:max_items], "endpoints": inventory.get("endpoints", [])[:max_items], "http": inventory.get("http", [])[:max_items], "source_file": inventory.get("source_file"), "target": inventory.get("target"), "tool_plan": inventory.get("tool_plan", {})}
 
 
+def active_discovery_enabled(rules: dict, *, authorized: bool) -> bool:
+    configured = rules.get("allow_active_discovery")
+    return bool(authorized) if configured is None else bool(configured)
+
+
 def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None, *, authorized=False):
     if not rules.get("authorization_required", True):
         raise SystemExit("rules.yaml must keep authorization_required=true")
-    if rules.get("allow_active_discovery", False) and not authorized:
+    active_enabled = active_discovery_enabled(rules, authorized=authorized)
+    if active_enabled and not authorized:
         raise SystemExit("active discovery requires --authorized to confirm permission for the listed scope")
+    rules = dict(rules)
+    rules["allow_active_discovery"] = active_enabled
     scope = dict(scope or {})
     scope.setdefault("program", "Authorized target assessment")
     if target and not scope.get("assets"):
@@ -112,7 +120,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 print(f"[recon] Collecting inventory for {len(seeds)} scope seed(s)", flush=True)
                 inventory = _collect_scope_inventory(scope, rules, target, out / "recon")
         active_testing = {"status": "skipped", "reason": "allow_active_discovery=false", "findings": []}
-        if rules.get("allow_active_discovery", False):
+        if active_enabled:
             print("[active] Testing all authorized assets discovered in scope", flush=True)
             active_testing = run_active_testing(target, inventory, out / "active", scope=scope)
             store.checkpoint(run_id, "active_testing", active_testing)
