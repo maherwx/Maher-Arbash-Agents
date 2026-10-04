@@ -11,7 +11,25 @@ from .protocol_intelligence import analyze_http_records
 from .workflow_intelligence import build_workflow_model, compare_identity_workflows
 from .test_matrix import build_advanced_test_matrix
 from .adaptive_prioritizer import rank_analysis_targets
+from .knowledge_graph import build_application_graph
+from .provenance_engine import build_provenance_chains, summarize_provenance
+from .report_evidence import build_evidence_report
 from .persistence import ResearchStore
+
+
+def _inventory_from_records(records: list[dict]) -> dict:
+    hosts = {}
+    endpoints = {}
+    for record in records:
+        url = str(record.get("url") or "")
+        if not url:
+            continue
+        from urllib.parse import urlparse
+        u = urlparse(url)
+        if u.netloc:
+            hosts[u.netloc] = {"value": u.netloc}
+            endpoints[url] = {"value": url}
+    return {"hosts": list(hosts.values()), "endpoints": list(endpoints.values())}
 
 
 def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path = "results/traffic-analysis", db_path: str | Path = ".maher/research.db") -> dict:
@@ -33,8 +51,24 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
         protocols=protocols,
     )
 
+    inventory = _inventory_from_records(records)
+    graph = build_application_graph(
+        inventory,
+        protocol_intelligence=protocols,
+        behavior_model=behavior,
+        anomalies=anomalies,
+    )
+    provenance = build_provenance_chains(graph)
+    provenance_summary = summarize_provenance(provenance)
+    evidence_report = build_evidence_report(
+        priorities=priorities,
+        provenance=provenance,
+        anomalies=anomalies,
+        workflow_divergences=workflow_divergences,
+    )
+
     result = {
-        "schema_version": "2.1",
+        "schema_version": "2.2",
         "source_file": str(source),
         "source_kind": kind,
         "record_count": len(records),
@@ -46,6 +80,10 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
         "workflow_divergences": workflow_divergences,
         "test_matrix": test_matrix,
         "priorities": priorities,
+        "knowledge_graph": graph,
+        "provenance": provenance,
+        "provenance_summary": provenance_summary,
+        "evidence_report": evidence_report,
     }
 
     artifacts = {
@@ -57,13 +95,17 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
         "workflow-divergences.json": workflow_divergences,
         "test-matrix.json": test_matrix,
         "priorities.json": priorities,
+        "knowledge-graph.json": graph,
+        "provenance-chains.json": provenance,
+        "provenance-summary.json": provenance_summary,
+        "evidence-report.json": evidence_report,
         "summary.json": result,
     }
     for filename, payload in artifacts.items():
         (out / filename).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     store = ResearchStore(db_path)
-    run_id = store.create_run({"program": "traffic-analysis-v2.1", "source": str(source)})
+    run_id = store.create_run({"program": "traffic-analysis-v2.2", "source": str(source)})
     try:
         store.checkpoint(run_id, "traffic_ingest", {"count": len(records), "source": str(source)})
         store.checkpoint(run_id, "canonical_http", canonical)
@@ -74,6 +116,9 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
         store.checkpoint(run_id, "workflow_divergences", workflow_divergences)
         store.checkpoint(run_id, "advanced_test_matrix", test_matrix)
         store.checkpoint(run_id, "adaptive_priorities", priorities)
+        store.checkpoint(run_id, "knowledge_graph", graph)
+        store.checkpoint(run_id, "provenance_chains", provenance)
+        store.checkpoint(run_id, "evidence_report", evidence_report)
         for idx, item in enumerate(anomalies.get("anomalies", [])):
             store.add_evidence(run_id, f"traffic-anomaly:{idx}", "behavioral_anomaly", item)
         for idx, item in enumerate(workflow_divergences.get("divergences", [])):
@@ -82,6 +127,8 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
             store.add_evidence(run_id, f"protocol-signal:{idx}", "protocol_signal", item)
         for idx, item in enumerate(priorities.get("targets", [])[:100]):
             store.add_evidence(run_id, f"priority-target:{idx}", "adaptive_priority", item)
+        for idx, item in enumerate(provenance.get("chains", [])[:200]):
+            store.add_evidence(run_id, f"provenance-chain:{idx}", "evidence_provenance", item)
         store.finish(run_id)
     except Exception:
         store.finish(run_id, "failed")
