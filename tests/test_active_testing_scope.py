@@ -30,7 +30,7 @@ class ActiveTestingScopeTests(unittest.TestCase):
         self.assertIn("-fs", katana)
         self.assertEqual(katana[katana.index("-fs") + 1], "fqdn")
         self.assertEqual(target_lines, ["https://app.example.test", "https://app.example.test/login"])
-        self.assertEqual(result["scope_review"]["rejected_url_count"], 2)
+        self.assertEqual(result["scope_review"]["rejected_url_count"], 3)\n        self.assertIn("https://admin.example.test/", result["scope_review"]["rejected_urls"])
 
     def test_active_checks_cover_all_wildcard_hosts_and_skip_exclusions(self):
         commands = []
