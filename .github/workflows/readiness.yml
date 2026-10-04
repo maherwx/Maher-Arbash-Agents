@@ -43,4 +43,4 @@ jobs:
           cache: npm
           cache-dependency-path: analyzers/js-ts/package.json
       - run: cd analyzers/js-ts && npm install
-      - run: cd analyzers/js-ts && npx tsc --noEmit --allowJs false --skipLibCheck src/index.ts
+      - run: cd analyzers/js-ts && npm run check
