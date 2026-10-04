@@ -54,6 +54,9 @@ class ActiveTestingScopeTests(unittest.TestCase):
         scope = {"assets": ["*.example.test"], "out_of_scope": ["admin.example.test"]}
         with tempfile.TemporaryDirectory() as temp, patch("maher_bounty.active_testing._exec", side_effect=fake_exec):
             result = run_active_testing("example.test", inventory, temp, scope=scope)
+            nuclei_runs = [cmd for cmd in commands if cmd[0] == "nuclei"]
+            self.assertEqual(len(nuclei_runs), 1)
+            self.assertEqual(nuclei_runs[0][nuclei_runs[0].index("-l") + 1], str(Path(temp) / "targets.txt"))
 
         self.assertEqual(result["targets"], [
             "https://app.example.test",
@@ -63,12 +66,8 @@ class ActiveTestingScopeTests(unittest.TestCase):
         ])
         katana_targets = [cmd[cmd.index("-u") + 1] for cmd in commands if cmd[0] == "katana"]
         self.assertEqual(katana_targets, result["targets"])
-        nuclei_runs = [cmd for cmd in commands if cmd[0] == "nuclei"]
-        self.assertEqual(len(nuclei_runs), 1)
-        nuclei_target_file = Path(nuclei_runs[0][nuclei_runs[0].index("-l") + 1])
-        nuclei_targets = nuclei_target_file.read_text(encoding="utf-8").splitlines()
-        self.assertIn("https://app.example.test/login", nuclei_targets)
-        self.assertIn("https://api.example.test/v1", nuclei_targets)
+        self.assertIn("https://app.example.test/login", result["discovered_in_scope_urls"])
+        self.assertIn("https://api.example.test/v1", result["discovered_in_scope_urls"])
         self.assertEqual(result["scope_review"]["rejected_url_count"], 3)
         self.assertIn("https://admin.example.test/", result["scope_review"]["rejected_urls"])
 
