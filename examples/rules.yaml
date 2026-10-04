@@ -4,3 +4,4 @@ no_destructive_testing: true
 no_denial_of_service: true
 no_persistence: true
 report_evidence: true
+allow_active_discovery: true
