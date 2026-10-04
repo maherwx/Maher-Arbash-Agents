@@ -3,7 +3,7 @@ import json
 import shutil
 from pathlib import Path
 
-from .orchestrator import run
+from .orchestrator import run, run_target
 from .result_store import build_inventory
 from .traffic_ingest import ingest_traffic
 from .traffic_pipeline import analyze_traffic
@@ -44,6 +44,12 @@ def main():
     r.add_argument("--rules", required=True)
     r.add_argument("--out", default="reports")
     r.add_argument("--inventory", default=None, help="Normalized inventory.json to feed the research engine")
+
+    auto = s.add_parser("auto-run", help="Collect target inventory and run the full collaborative pipeline")
+    auto.add_argument("--target", required=True, help="Authorized website/domain target")
+    auto.add_argument("--authorized", action="store_true", help="Confirm you own or have explicit permission to test this target")
+    auto.add_argument("--rules", default=None, help="Optional rules YAML; safe defaults are used when omitted")
+    auto.add_argument("--out", default="results/auto")
 
     inv = s.add_parser("inventory", help="Normalize and deduplicate collected recon data")
     inv.add_argument("result_dir")
@@ -120,6 +126,16 @@ def main():
     if a.cmd == "run":
         result = run(a.scope, a.rules, a.out, a.inventory)
         print(f"Completed {result['agent_count']} agent passes. Reports: {a.out}")
+        return
+    if a.cmd == "auto-run":
+        result = run_target(a.target, a.rules, a.out, authorized=a.authorized)
+        print(json.dumps({
+            "target": a.target,
+            "inventory_counts": result.get("inventory_counts", {}),
+            "agent_count": result.get("agent_count", 0),
+            "active_discovery_enabled": result.get("tool_plan", {}).get("active_discovery_enabled", False),
+            "out": a.out,
+        }, indent=2))
 
 
 if __name__ == "__main__":
