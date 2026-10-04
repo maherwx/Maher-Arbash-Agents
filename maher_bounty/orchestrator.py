@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 import json
 import os
@@ -156,7 +157,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         model = LocalModelAdapter()
         agents = load_agents()
         waves = build_waves(agents)
-        print(f"[agents] Starting {len(agents)} agents in {len(waves)} collaboration waves", flush=True)
+        print(f"[agents] Starting {len(agents)} specialist roles in {len(waves)} collaboration waves; mode={model.mode}", flush=True)
         results = []
         wave_summary = []
         for wave_index, wave in enumerate(waves, start=1):
@@ -180,6 +181,16 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             wave_summary.append({"wave": wave_index, "agents": [r.get("agent") for r in current], "shared_evidence_packets_after_wave": len(evidence_bus(results))})
             store.checkpoint(run_id, f"wave_{wave_index}", current)
 
+        agent_status_counts = Counter(str(row.get("status", "unknown")) for row in results)
+        agent_execution = {
+            "mode": model.mode,
+            "configured_roles": len(agents),
+            "successful_model_analyses": sum(1 for row in results if row.get("status") not in {"planned", "model_error"}),
+            "planning_only": agent_status_counts.get("planned", 0),
+            "model_errors": agent_status_counts.get("model_error", 0),
+            "status_counts": dict(agent_status_counts),
+        }
+
         print("[report] Reviewing findings and building report bundle", flush=True)
         reviewed_findings = review_findings(results)
         store.save_findings(run_id, reviewed_findings)
@@ -191,12 +202,19 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "validated_evidence": validation, "agent_workstreams": workstreams,
             "hypothesis_count": len(hypotheses), "hypotheses": hypotheses,
             "application_graph_stats": graph.get("stats", {}), "native_engines": native,
-            "collaboration_waves": wave_summary, "agent_count": len(results), "results": results,
+            "collaboration_waves": wave_summary, "agent_count": len(results),
+            "agent_execution": agent_execution, "results": results,
         }
         build_report_bundle(out, payload, reviewed_findings, topology)
         (out / "application-graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
         store.finish(run_id)
-        print(f"[done] Completed {len(results)} agent passes. Reports: {out}", flush=True)
+        print(
+            f"[done] Agent analysis mode={agent_execution['mode']} "
+            f"model_analyzed={agent_execution['successful_model_analyses']} "
+            f"planning_only={agent_execution['planning_only']} "
+            f"model_errors={agent_execution['model_errors']}. Reports: {out}",
+            flush=True,
+        )
         return payload
     except Exception:
         store.finish(run_id, "failed")
