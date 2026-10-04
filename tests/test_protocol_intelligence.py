@@ -22,7 +22,19 @@ class ProtocolIntelligenceTests(unittest.TestCase):
             root = Path(td)
             (root / "service.proto").write_text('syntax="proto3"; service Accounts { rpc Get (Req) returns (Resp); }', encoding="utf-8")
             (root / "client.ts").write_text('const socket = new WebSocket("wss://example.test/events"); const q=`mutation UpdateUser { updateUser { id } }`;', encoding="utf-8")
-            (root / "openapi.yaml").write_text('openapi: 3.1.0\ninfo:\n  title: Example\n  version: 1.0.0\n', encoding="utf-8")
+            (root / "openapi.yaml").write_text(
+                "openapi: 3.1.0\n"
+                "info:\n"
+                "  title: Example\n"
+                "  version: 1.0.0\n"
+                "paths:\n"
+                "  /health:\n"
+                "    get:\n"
+                "      responses:\n"
+                "        '200':\n"
+                "          description: ok\n",
+                encoding="utf-8",
+            )
             result = analyze_source_protocols(root)
             counts = result["protocol_counts"]
             self.assertIn("grpc-proto", counts)
