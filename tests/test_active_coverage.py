@@ -7,6 +7,7 @@ from maher_bounty.active_testing import (
     _directory_discovery,
     _in_scope_unique,
     _tool_coverage,
+    run_active_testing,
 )
 
 
@@ -46,6 +47,38 @@ class ActiveCoverageTests(unittest.TestCase):
         semgrep = next(row for row in rows if row["name"] == "Semgrep")
         self.assertEqual(semgrep["execution_status"], "requires_input")
         self.assertIn("source repository", semgrep["reason"])
+
+
+    @patch("maher_bounty.active_testing._exec")
+    @patch("maher_bounty.active_testing.shutil.which", return_value=None)
+    def test_coordinator_records_adaptive_skip_when_no_xss_inputs_exist(self, which, run):
+        run.side_effect = lambda cmd, **kwargs: {"tool": cmd[0], "status": "missing", "command": cmd}
+        with tempfile.TemporaryDirectory() as td:
+            result = run_active_testing(
+                "https://example.test/",
+                {"endpoints": [{"value": "https://example.test/"}]},
+                td,
+                scope={"assets": ["https://example.test/"], "out_of_scope": []},
+            )
+        decisions = result["adaptive_coordinator"]["decisions"]
+        self.assertTrue(any(row["stage"] == "xss_triage" and row["decision"] == "skip Dalfox" for row in decisions))
+        dalfox = next(row for row in result["tool_coverage"] if row["command"] == "dalfox")
+        self.assertEqual(dalfox["execution_status"], "skipped")
+
+    @patch("maher_bounty.active_testing._exec")
+    @patch("maher_bounty.active_testing.shutil.which", side_effect=lambda name: "/usr/bin/ffuf" if name == "ffuf" else None)
+    def test_directory_discovery_returns_reported_urls_for_next_stage(self, which, run):
+        def fake_exec(command, **kwargs):
+            output = Path(command[command.index("-o") + 1])
+            output.write_text(
+                '{"results":[{"url":"https://example.test/admin"}]}',
+                encoding="utf-8",
+            )
+            return {"tool": "ffuf", "status": "ok", "command": command}
+        run.side_effect = fake_exec
+        with tempfile.TemporaryDirectory() as td:
+            discovered = _directory_discovery("https://example.test/", Path(td), [])
+        self.assertEqual(discovered, ["https://example.test/admin"])
 
 
 if __name__ == "__main__":
