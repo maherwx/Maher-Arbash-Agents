@@ -64,6 +64,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             inventory = collect_target_inventory(target, recon_dir, rules=rules)
             inventory["source_file"] = str(recon_dir / "inventory.json")
 
+        print("[analysis] Building hypotheses and application graph", flush=True)
         context_inventory = compact_inventory(inventory)
         hypotheses = build_hypotheses(context_inventory)
         topology = architecture_map(context_inventory)
@@ -81,8 +82,10 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
 
         model = LocalModelAdapter()
         agents = load_agents(); waves = build_waves(agents)
+        print(f"[agents] Starting {len(agents)} agents in {len(waves)} collaboration waves", flush=True)
         results = []; wave_summary = []
         for wave_index, wave in enumerate(waves, start=1):
+            print(f"[agents] Wave {wave_index}/{len(waves)}: {len(wave)} agents", flush=True)
             prior_evidence = evidence_bus(results)
             current = []
             for agent in wave:
@@ -99,6 +102,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             wave_summary.append({"wave": wave_index, "agents": [r.get("agent") for r in current], "shared_evidence_packets_after_wave": len(evidence_bus(results))})
             store.checkpoint(run_id, f"wave_{wave_index}", current)
 
+        print("[report] Reviewing findings and building report bundle", flush=True)
         reviewed_findings = review_findings(results)
         store.save_findings(run_id, reviewed_findings)
         payload = {
@@ -112,6 +116,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         build_report_bundle(out, payload, reviewed_findings, topology)
         (out / "application-graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
         store.finish(run_id)
+        print(f"[done] Completed {len(results)} agent passes. Reports: {out}", flush=True)
         return payload
     except Exception:
         store.finish(run_id, "failed")
