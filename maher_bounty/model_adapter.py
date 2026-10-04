@@ -4,6 +4,52 @@ import urllib.error
 import urllib.request
 
 
+_AGENT_CONTEXT_FIELDS = (
+    "scope",
+    "rules",
+    "inventory",
+    "architecture_topology",
+    "application_graph",
+    "application_intelligence",
+    "agent_workstreams",
+    "validated_evidence",
+    "native_engine_analysis",
+    "active_testing",
+    "active_findings",
+    "hypotheses",
+    "prior_agent_evidence",
+    "research_directives",
+    "research_method",
+)
+
+
+def _bounded_context(value, *, depth=0):
+    """Keep model requests useful and bounded even for large scan reports."""
+    if depth >= 7:
+        return "[nested context omitted]"
+    if isinstance(value, dict):
+        return {
+            str(key): _bounded_context(item, depth=depth + 1)
+            for key, item in list(value.items())[:100]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_bounded_context(item, depth=depth + 1) for item in value[:120]]
+    if isinstance(value, str):
+        return value[:12000]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:1000]
+
+
+def build_agent_context(agent, context):
+    """Pass the complete evidence packet, not only the asset inventory."""
+    packet = {"agent": agent}
+    for field in _AGENT_CONTEXT_FIELDS:
+        if field in context:
+            packet[field] = context[field]
+    return _bounded_context(packet)
+
+
 class LocalModelAdapter:
     """Optional adapter for any local OpenAI-compatible model server.
 
@@ -16,9 +62,17 @@ class LocalModelAdapter:
         self.model = os.getenv("MAHER_MODEL_ID", "").strip()
         self.timeout = int(os.getenv("MAHER_MODEL_TIMEOUT", "120"))
 
+    @property
+    def enabled(self):
+        return bool(self.url and self.model)
+
+    @property
+    def mode(self):
+        return "local_model" if self.enabled else "planning_only"
+
     def analyze(self, agent, context):
         inventory = context.get("inventory", {})
-        if not self.url or not self.model:
+        if not self.enabled:
             counts = inventory.get("counts", {}) if isinstance(inventory, dict) else {}
             return {
                 "agent": agent["id"],
@@ -27,7 +81,10 @@ class LocalModelAdapter:
                     f"Inventory available: {counts.get('hosts', 0)} hosts, {counts.get('endpoints', 0)} endpoints, {counts.get('http', 0)} HTTP records"
                 ],
                 "candidate_findings": [],
-                "evidence_notes": ["No local model configured; set MAHER_MODEL_URL and MAHER_MODEL_ID to enable model-assisted analysis."],
+                "evidence_notes": [
+                    "Agent analysis was not executed: no local model is configured. "
+                    "Set MAHER_MODEL_URL and MAHER_MODEL_ID to enable model-assisted analysis."
+                ],
                 "next_checks": [agent.get("mission", "")],
             }
 
@@ -36,22 +93,32 @@ class LocalModelAdapter:
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a vulnerability-research agent operating within the supplied authorized bug-bounty program. Analyze the provided normalized reconnaissance inventory for your assigned mission. Prefer evidence-backed observations, identify duplicates, and return JSON only with keys: status, observations, candidate_findings, evidence_notes, next_checks.",
+                    "content": (
+                        "You are a specialist vulnerability-research agent. Work only within the "
+                        "provided authorization scope and assigned mission. The user message contains "
+                        "the full available evidence packet: scan runs, findings, application model, "
+                        "hypotheses, and prior agents' evidence. Do not claim a check ran unless its "
+                        "tool run is present. Never invent observations, endpoints, or proof. For each "
+                        "candidate finding, cite the exact in-scope URL and supplied evidence; distinguish "
+                        "observed facts from hypotheses and proposed next checks. Prefer safe, "
+                        "non-destructive validation and respect all program rules. Return JSON only "
+                        "with keys: status, observations, candidate_findings, evidence_notes, next_checks."
+                    ),
                 },
                 {
                     "role": "user",
-                    "content": json.dumps({
-                        "agent": agent,
-                        "scope": context.get("scope", {}),
-                        "rules": context.get("rules", {}),
-                        "inventory": inventory,
-                    }, ensure_ascii=False),
+                    "content": json.dumps(build_agent_context(agent, context), ensure_ascii=False),
                 },
             ],
             "temperature": 0.2,
             "stream": False,
         }
-        req = urllib.request.Request(self.url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(
+            self.url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 raw = json.loads(resp.read().decode("utf-8"))
