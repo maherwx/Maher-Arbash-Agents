@@ -44,3 +44,26 @@ jobs:
           cache-dependency-path: analyzers/js-ts/package.json
       - run: cd analyzers/js-ts && npm install
       - run: cd analyzers/js-ts && npm run check
+
+  ecosystem-runtime-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+      - run: java -version
+      - run: dotnet --info
+      - run: php --version
+      - run: ruby --version
+      - run: gcc --version && g++ --version
