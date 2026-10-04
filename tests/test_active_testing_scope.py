@@ -1,0 +1,37 @@
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from maher_bounty.active_testing import run_active_testing
+
+
+class ActiveTestingScopeTests(unittest.TestCase):
+    def test_crawler_uses_exact_fqdn_and_parameter_scan_is_allowlisted(self):
+        commands = []
+
+        def fake_exec(cmd, *, timeout, output=None):
+            commands.append(cmd)
+            return {"tool": cmd[0], "status": "missing", "command": cmd}
+
+        inventory = {
+            "endpoints": [
+                {"value": "https://app.example.test/login"},
+                {"value": "https://api.example.test/secret"},
+                {"value": "https://evil.test/"},
+            ]
+        }
+        scope = {"assets": ["app.example.test"], "out_of_scope": []}
+        with tempfile.TemporaryDirectory() as temp, patch("maher_bounty.active_testing._exec", side_effect=fake_exec):
+            result = run_active_testing("https://app.example.test", inventory, temp, scope=scope)
+            target_lines = (Path(temp) / "targets.txt").read_text(encoding="utf-8").splitlines()
+
+        katana = next(cmd for cmd in commands if cmd[0] == "katana")
+        self.assertIn("-fs", katana)
+        self.assertEqual(katana[katana.index("-fs") + 1], "fqdn")
+        self.assertEqual(target_lines, ["https://app.example.test", "https://app.example.test/login"])
+        self.assertEqual(result["scope_review"]["rejected_url_count"], 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
