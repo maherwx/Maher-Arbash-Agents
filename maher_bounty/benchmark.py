@@ -36,18 +36,27 @@ def default_cases() -> list[BenchmarkCase]:
         expected_min_records=1,
         expected_no_protocols=True,
     )
+    graphql_entry={
+        "startedDateTime":"2026-01-01T00:00:00Z",
+        "request":{
+            "method":"POST",
+            "url":"https://bench.test/graphql",
+            "headers":[{"name":"Content-Type","value":"application/json"}],
+            "postData":{"text":"{\"query\":\"query Viewer { viewer { id } }\"}"},
+        },
+        "response":{
+            "status":200,
+            "headers":[{"name":"Content-Type","value":"application/json"}],
+            "content":{"text":"{\"data\":{\"viewer\":{\"id\":\"1\"}}}"},
+        },
+    }
     graphql=BenchmarkCase(
         name="graphql_signal",
-        har={"log":{"entries":[{
-            "startedDateTime":"2026-01-01T00:00:00Z",
-            "request":{"method":"POST","url":"https://bench.test/graphql","headers":[{"name":"Content-Type","value":"application/json"}],"postData":{"text":"{\"query\":\"query Viewer { viewer { id } }\"}"}},
-            "response":{"status":200,"headers":[{"name":"Content-Type","value":"application/json"}],"content":{"text":"{\"data\":{\"viewer\":{\"id\":\"1\"}}}"},
-        }]}},
+        har={"log":{"entries":[graphql_entry]}},
         expected_min_records=1,
         expected_protocols=("graphql",),
         expected_priority_min=1,
     )
-    # Two cookie identities traverse the same transition with different outcomes.
     workflow=BenchmarkCase(
         name="identity_workflow_divergence",
         har={"log":{"entries":[
