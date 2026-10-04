@@ -96,17 +96,24 @@ def filter_in_scope_urls(values, scope: dict | None = None, *, target: str | Non
 
 
 def scope_seed_targets(scope: dict | None, *, target: str | None = None) -> list[str]:
-    """Return distinct passive-enumeration seeds for exact and wildcard scope entries."""
+    """Return distinct enumeration seeds while skipping explicitly excluded hosts."""
     scope = scope if isinstance(scope, dict) else {}
     values = _values(scope.get("assets"))
     if target:
         values.insert(0, target)
+    excluded = []
+    for raw in _values(scope.get("out_of_scope")):
+        parsed = _parsed_rule(raw)
+        if parsed:
+            excluded.append((parsed[0], parsed[1]))
     seeds, seen = [], set()
     for raw in values:
         parsed = _parsed_rule(raw)
         if not parsed:
             continue
         host, _, scheme, port = parsed
+        if any(_matches(host, pattern) for pattern in excluded):
+            continue
         authority = f"[{host}]" if ":" in host else host
         if port:
             authority = f"{authority}:{port}"
