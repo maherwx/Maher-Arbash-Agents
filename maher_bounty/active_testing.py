@@ -127,8 +127,8 @@ def _tool_coverage(inventory: dict, runs: list[dict]) -> list[dict]:
         item = dict(recommendation)
         command = item.get("command")
         if command and command in statuses:
-            item["execution_status"] = "executed"
             item["run_statuses"] = statuses[command]
+            item["execution_status"] = "skipped" if all(status == "skipped" for status in statuses[command]) else "executed"
         elif item.get("mode") in {"manual_proxy_report_import", "static"}:
             item["execution_status"] = "requires_input"
             item["reason"] = "manual traffic/report or source repository is required"
