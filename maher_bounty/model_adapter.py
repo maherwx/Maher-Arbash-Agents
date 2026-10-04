@@ -103,7 +103,11 @@ class LocalModelAdapter:
                         "candidate finding, cite the exact in-scope URL and supplied evidence; distinguish "
                         "observed facts from hypotheses and proposed next checks. Prefer safe, "
                         "non-destructive validation and respect all program rules. Return JSON only "
-                        "with keys: status, observations, candidate_findings, evidence_notes, next_checks."
+                        "with keys: status, observations, candidate_findings, evidence_notes, next_checks, tool_requests. "
+                        "tool_requests must be a list of objects with tool set only to nuclei, dalfox, or zap-baseline.py "
+                        "and targets containing only exact URLs already present in the supplied in-scope evidence. "
+                        "Never provide commands, new hosts, or payloads. Request a tool only when evidence justifies it; "
+                        "otherwise return an empty list."
                     ),
                 },
                 {
@@ -149,4 +153,5 @@ class LocalModelAdapter:
                 "candidate_findings": [],
                 "evidence_notes": [str(exc)],
                 "next_checks": [agent.get("mission", "")],
+                "tool_requests": [],
             }
