@@ -30,14 +30,16 @@ class TrafficPipelineV2Tests(unittest.TestCase):
             source.write_text(json.dumps(har), encoding="utf-8")
             out = root / "out"
             result = analyze_traffic(source, kind="har", out_dir=out, db_path=root / "research.db")
-            self.assertEqual(result["schema_version"], "2.0")
+            self.assertEqual(result["schema_version"], "2.1")
             self.assertIn("protocols", result)
             self.assertIn("workflow", result)
             self.assertIn("test_matrix", result)
+            self.assertIn("priorities", result)
+            self.assertGreaterEqual(result["priorities"]["target_count"], 1)
             for name in (
                 "canonical-http.json", "behavior-model.json", "anomalies.json",
                 "protocol-intelligence.json", "workflow-model.json",
-                "workflow-divergences.json", "test-matrix.json", "summary.json",
+                "workflow-divergences.json", "test-matrix.json", "priorities.json", "summary.json",
             ):
                 self.assertTrue((out / name).exists(), name)
 
