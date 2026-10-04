@@ -58,6 +58,8 @@ def is_in_scope_url(value: str, scope: dict | None = None, *, target: str | None
     """Return whether an HTTP(S) URL is explicitly in scope; exclusions always win."""
     if not isinstance(value, str):
         return False
+    if value != value.strip():
+        return False
     host = _host_from_url(value)
     if not host:
         return False
@@ -88,7 +90,7 @@ def filter_in_scope_urls(values, scope: dict | None = None, *, target: str | Non
     for value in values:
         if not isinstance(value, str) or not value.strip():
             continue
-        candidate = value.strip()
+        candidate = value
         if candidate not in seen:
             seen.add(candidate)
             (allowed if is_in_scope_url(candidate, scope, target=target) else rejected).append(candidate)
@@ -96,7 +98,7 @@ def filter_in_scope_urls(values, scope: dict | None = None, *, target: str | Non
 
 
 def scope_seed_targets(scope: dict | None, *, target: str | None = None) -> list[str]:
-    """Return distinct enumeration seeds while skipping explicitly excluded hosts."""
+    """Return distinct enumeration seeds without rewriting explicit URL assets."""
     scope = scope if isinstance(scope, dict) else {}
     values = _values(scope.get("assets"))
     if target:
@@ -111,63 +113,43 @@ def scope_seed_targets(scope: dict | None, *, target: str | None = None) -> list
         parsed = _parsed_rule(raw)
         if not parsed:
             continue
-        host, _, scheme, port = parsed
+        host, wildcard, scheme, port = parsed
         if any(_matches(host, pattern) for pattern in excluded):
             continue
-        authority = f"[{host}]" if ":" in host else host
-        if port:
-            authority = f"{authority}:{port}"
-        url = f"{scheme}://{authority}"
-        if url not in seen:
-            seen.add(url)
-            seeds.append(url)
+        if wildcard:
+            authority = f"[{host}]" if ":" in host else host
+            if port:
+                authority = f"{authority}:{port}"
+            seed = f"{scheme}://{authority}"
+        else:
+            seed = raw
+        if seed not in seen:
+            seen.add(seed)
+            seeds.append(seed)
     return seeds
 
 
 def scope_target_urls(scope: dict | None, inventory: dict | None, *, target: str | None = None) -> tuple[list[str], list[str]]:
-    """Build all explicitly authorized HTTP(S) origins from scope and discovered inventory."""
+    """Return in-scope URL strings verbatim; parsing is used only for authorization."""
     scope = scope if isinstance(scope, dict) else {}
     inventory = inventory if isinstance(inventory, dict) else {}
     candidates = []
     asset_values = _values(scope.get("assets"))
     for raw in asset_values:
         parsed = _parsed_rule(raw)
-        if not parsed or parsed[1]:
-            continue
-        host, _, scheme, port = parsed
-        authority = f"[{host}]" if ":" in host else host
-        if port:
-            authority = f"{authority}:{port}"
-        candidates.append(f"{scheme}://{authority}")
+        if parsed and not parsed[1]:
+            candidates.append(raw)
     if target:
         candidates.append(target)
     for row in inventory.get("hosts", []):
         value = row if isinstance(row, str) else row.get("value") or row.get("host") if isinstance(row, dict) else None
         if isinstance(value, str) and value.strip() and not value.strip().startswith("*."):
-            candidates.append(value.strip() if "://" in value else "https://" + value.strip())
+            # Host-only inventory rows need a scheme; URL rows remain byte-for-byte intact.
+            candidates.append(value if "://" in value else "https://" + value)
     for row in inventory.get("endpoints", []):
         value = row if isinstance(row, str) else row.get("value") or row.get("url") if isinstance(row, dict) else None
         if isinstance(value, str):
             candidates.append(value)
 
     fallback_target = target if not asset_values else None
-    allowed, rejected = filter_in_scope_urls(candidates, scope, target=fallback_target)
-    origins, seen = [], set()
-    for value in allowed:
-        parsed = urlparse(value if "://" in value else "https://" + value)
-        host = (parsed.hostname or "").lower()
-        if not host:
-            continue
-        scheme = parsed.scheme.lower() if parsed.scheme.lower() in {"http", "https"} else "https"
-        authority = f"[{host}]" if ":" in host else host
-        try:
-            port = parsed.port
-        except ValueError:
-            continue
-        if port:
-            authority = f"{authority}:{port}"
-        origin = f"{scheme}://{authority}"
-        if origin not in seen:
-            seen.add(origin)
-            origins.append(origin)
-    return origins, rejected
+    return filter_in_scope_urls(candidates, scope, target=fallback_target)
