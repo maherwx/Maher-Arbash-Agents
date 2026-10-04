@@ -18,17 +18,6 @@ class FlowEdge:
 
 
 def build_interprocedural_dataflow(ir: dict) -> dict:
-    """
-    Build a conservative, explainable interprocedural data-flow graph from Unified IR.
-
-    The graph links:
-      function -> parameter
-      read/write variable relations
-      call-site -> callee
-      caller parameters/reads -> callee parameters when arity/symbol evidence supports it
-
-    This is intentionally evidence-preserving: uncertain edges carry lower confidence.
-    """
     functions={fn["id"]:fn for fn in ir.get("functions", [])}
     edges:list[FlowEdge]=[]
     nodes:dict[str,dict]={}
@@ -36,13 +25,11 @@ def build_interprocedural_dataflow(ir: dict) -> dict:
     def add_node(node_id:str, kind:str, **attrs):
         nodes.setdefault(node_id, {"id":node_id,"kind":kind,**attrs})
 
-    def add_edge(source:str,target:str,kind:str,symbol:str|None,confidence:float,**prov):
-        edges.append(FlowEdge(source,target,kind,symbol,confidence,prov))
+    def add_edge(src:str,dst:str,kind:str,symbol:str|None,confidence:float,**prov):
+        edges.append(FlowEdge(src,dst,kind,symbol,confidence,prov))
 
-    by_name=defaultdict(list)
     for fn in functions.values():
-        by_name[fn.get("name")].append(fn)
-        add_node(fn["id"],"function",language=fn.get("language"),file=fn.get("file"),name=fn.get("name"),line=fn.get("line"),complexity=fn.get("complexity"))
+        add_node(fn["id"],"function",language=fn.get("language"),file=fn.get("file"),name=fn.get("name"),line=fn.get("line"),complexity=fn.get("complexity"),route_bindings=fn.get("route_bindings",[]))
         for idx,p in enumerate(fn.get("parameters", [])):
             pid=f'{fn["id"]}:param:{idx}:{p}'
             add_node(pid,"parameter",name=p,index=idx,function_id=fn["id"])
@@ -56,46 +43,34 @@ def build_interprocedural_dataflow(ir: dict) -> dict:
             add_node(vid,"variable_write",name=name,function_id=fn["id"])
             add_edge(fn["id"],vid,"writes",name,0.95,file=fn.get("file"),line=fn.get("line"))
 
-    resolved_calls=[]
     for edge in ir.get("call_edges", []):
         caller=functions.get(edge.get("from"))
         callee=functions.get(edge.get("to"))
         if not caller or not callee:
             continue
         symbol=edge.get("symbol")
-        add_edge(caller["id"],callee["id"],"calls",symbol,0.99,source="unified_ir")
-        resolved_calls.append((caller,callee,symbol))
-
+        add_edge(caller["id"],callee["id"],"calls",symbol,0.99,origin="unified_ir")
         caller_params=list(caller.get("parameters", []))
         caller_reads=set(caller.get("reads", []))
         callee_params=list(callee.get("parameters", []))
         for idx,param in enumerate(callee_params):
             target=f'{callee["id"]}:param:{idx}:{param}'
             if idx < len(caller_params):
-                source=f'{caller["id"]}:param:{idx}:{caller_params[idx]}'
-                add_edge(source,target,"argument_flow",caller_params[idx],0.72,reason="positional-parameter correspondence",call_symbol=symbol)
+                src=f'{caller["id"]}:param:{idx}:{caller_params[idx]}'
+                add_edge(src,target,"argument_flow",caller_params[idx],0.72,reason="positional-parameter correspondence",call_symbol=symbol)
             for read in caller_reads:
-                if read == param or read.lower() == param.lower():
-                    source=f'{caller["id"]}:read:{read}'
-                    add_edge(source,target,"argument_flow",read,0.88,reason="matching caller read and callee parameter",call_symbol=symbol)
+                if read == param or read.lower() == str(param).lower():
+                    src=f'{caller["id"]}:read:{read}'
+                    add_edge(src,target,"argument_flow",read,0.88,reason="matching caller read and callee parameter",call_symbol=symbol)
 
-    incoming=defaultdict(list)
     outgoing=defaultdict(list)
     for e in edges:
-        item=e.as_dict()
-        outgoing[e.source].append(item)
-        incoming[e.target].append(item)
+        outgoing[e.source].append(e.as_dict())
 
-    route_sources=[]
-    for fn in functions.values():
-        if fn.get("route_bindings"):
-            route_sources.append(fn["id"])
-
+    route_sources=[fn["id"] for fn in functions.values() if fn.get("route_bindings")]
     reachable={}
     for start in route_sources:
-        seen={start}
-        q=deque([(start,0)])
-        reached=[]
+        seen={start}; q=deque([(start,0)]); reached=[]
         while q:
             current,depth=q.popleft()
             if depth>=6:
@@ -109,7 +84,7 @@ def build_interprocedural_dataflow(ir: dict) -> dict:
         reachable[start]=reached
 
     return {
-        "schema_version":"1.0",
+        "schema_version":"1.1",
         "node_count":len(nodes),
         "edge_count":len(edges),
         "nodes":list(nodes.values()),
