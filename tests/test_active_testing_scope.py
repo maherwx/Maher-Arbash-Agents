@@ -55,9 +55,17 @@ class ActiveTestingScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, patch("maher_bounty.active_testing._exec", side_effect=fake_exec):
             result = run_active_testing("example.test", inventory, temp, scope=scope)
 
-        self.assertEqual(result["targets"], ["https://app.example.test", "https://api.example.test"])
+        self.assertEqual(result["targets"], [
+            "https://app.example.test",
+            "https://api.example.test",
+            "https://app.example.test/login",
+            "https://api.example.test/v1",
+        ])
         katana_targets = [cmd[cmd.index("-u") + 1] for cmd in commands if cmd[0] == "katana"]
         self.assertEqual(katana_targets, result["targets"])
+        nuclei_targets = [cmd[cmd.index("-u") + 1] for cmd in commands if cmd[0] == "nuclei"]
+        self.assertIn("https://app.example.test/login", nuclei_targets)
+        self.assertIn("https://api.example.test/v1", nuclei_targets)
         self.assertEqual(result["scope_review"]["rejected_url_count"], 3)
         self.assertIn("https://admin.example.test/", result["scope_review"]["rejected_urls"])
 
