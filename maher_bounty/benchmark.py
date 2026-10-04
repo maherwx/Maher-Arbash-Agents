@@ -9,6 +9,7 @@ from .benchmark_quality import capability_quality, quality_gate
 from .benchmark_adversarial import adversarial_cases
 from .benchmark_scale import scaled_negative_cases
 from .benchmark_positive import scaled_positive_cases
+from .benchmark_workflows import workflow_cases
 from .traffic_pipeline import analyze_traffic
 
 @dataclass(slots=True)
@@ -38,6 +39,7 @@ def default_cases()->list[BenchmarkCase]:
     cases.extend(adversarial_cases(BenchmarkCase,_entry))
     cases.extend(scaled_negative_cases(BenchmarkCase,_entry,count=36))
     cases.extend(scaled_positive_cases(BenchmarkCase,_entry))
+    cases.extend(workflow_cases(BenchmarkCase,_entry))
     return cases
 
 def run_benchmark(out_dir:str|Path,cases:list[BenchmarkCase]|None=None)->dict:
@@ -56,6 +58,6 @@ def run_benchmark(out_dir:str|Path,cases:list[BenchmarkCase]|None=None)->dict:
             else: tn+=1
             results.append({"name":case.name,"passed":all(checks.values()),"checks":checks,"classification":{"expected_signal":expected,"observed_signal":observed},"observed":{"records":result.get("record_count",0),"protocols":sorted(protocols),"workflow_divergences":div,"priority_targets":pri,"provenance_chains":result.get("provenance",{}).get("chain_count",0),"evidence_items":result.get("evidence_report",{}).get("item_count",0)}})
     passed=sum(x["passed"] for x in results); precision=tp/max(1,tp+fp); recall=tp/max(1,tp+fn); specificity=tn/max(1,tn+fp); fpr=fp/max(1,fp+tn)
-    summary={"schema_version":"1.6","case_count":len(results),"passed":passed,"failed":len(results)-passed,"pass_rate":round(passed/max(1,len(results)),4),"quality":{"true_positive":tp,"false_positive":fp,"true_negative":tn,"false_negative":fn,"precision":round(precision,4),"recall":round(recall,4),"specificity":round(specificity,4),"false_positive_rate":round(fpr,4)},"results":results}
+    summary={"schema_version":"1.7","case_count":len(results),"passed":passed,"failed":len(results)-passed,"pass_rate":round(passed/max(1,len(results)),4),"quality":{"true_positive":tp,"false_positive":fp,"true_negative":tn,"false_negative":fn,"precision":round(precision,4),"recall":round(recall,4),"specificity":round(specificity,4),"false_positive_rate":round(fpr,4)},"results":results}
     summary["capability_quality"]=capability_quality(results); summary["quality_gate"]=quality_gate(summary)
     (out/"benchmark-summary.json").write_text(json.dumps(summary,indent=2),encoding="utf-8"); return summary
