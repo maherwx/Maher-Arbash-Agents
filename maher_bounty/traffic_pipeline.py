@@ -14,6 +14,7 @@ from .adaptive_prioritizer import rank_analysis_targets
 from .knowledge_graph import build_application_graph
 from .provenance_engine import build_provenance_chains, summarize_provenance
 from .report_evidence import build_evidence_report
+from .correlation_engine import correlate_evidence
 from .persistence import ResearchStore
 
 
@@ -45,67 +46,41 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
     workflow = build_workflow_model(records)
     workflow_divergences = compare_identity_workflows(workflow)
     test_matrix = build_advanced_test_matrix(canonical)
-    priorities = rank_analysis_targets(
-        anomalies=anomalies,
-        workflow_divergences=workflow_divergences,
-        protocols=protocols,
-    )
+    priorities = rank_analysis_targets(anomalies=anomalies, workflow_divergences=workflow_divergences, protocols=protocols)
 
     inventory = _inventory_from_records(records)
-    graph = build_application_graph(
-        inventory,
-        protocol_intelligence=protocols,
-        behavior_model=behavior,
-        anomalies=anomalies,
-    )
+    graph = build_application_graph(inventory, protocol_intelligence=protocols, behavior_model=behavior, anomalies=anomalies)
     provenance = build_provenance_chains(graph)
     provenance_summary = summarize_provenance(provenance)
-    evidence_report = build_evidence_report(
-        priorities=priorities,
-        provenance=provenance,
-        anomalies=anomalies,
-        workflow_divergences=workflow_divergences,
-    )
+    evidence_report = build_evidence_report(priorities=priorities, provenance=provenance, anomalies=anomalies, workflow_divergences=workflow_divergences)
+
+    # Correlation is intentionally conservative. The pipeline exposes the current
+    # traffic source now; callers can add replay/source-analysis evidence later.
+    correlations = correlate_evidence({"source": "traffic", "signals": protocols.get("signals", [])})
 
     result = {
-        "schema_version": "2.2",
-        "source_file": str(source),
-        "source_kind": kind,
-        "record_count": len(records),
-        "canonical_count": len(canonical),
-        "behavior": behavior,
-        "anomalies": anomalies,
-        "protocols": protocols,
-        "workflow": workflow,
-        "workflow_divergences": workflow_divergences,
-        "test_matrix": test_matrix,
-        "priorities": priorities,
-        "knowledge_graph": graph,
-        "provenance": provenance,
-        "provenance_summary": provenance_summary,
-        "evidence_report": evidence_report,
+        "schema_version": "2.3", "source_file": str(source), "source_kind": kind,
+        "record_count": len(records), "canonical_count": len(canonical),
+        "behavior": behavior, "anomalies": anomalies, "protocols": protocols,
+        "workflow": workflow, "workflow_divergences": workflow_divergences,
+        "test_matrix": test_matrix, "priorities": priorities, "knowledge_graph": graph,
+        "provenance": provenance, "provenance_summary": provenance_summary,
+        "evidence_report": evidence_report, "correlations": correlations,
     }
 
     artifacts = {
-        "canonical-http.json": canonical,
-        "behavior-model.json": behavior,
-        "anomalies.json": anomalies,
-        "protocol-intelligence.json": protocols,
-        "workflow-model.json": workflow,
-        "workflow-divergences.json": workflow_divergences,
-        "test-matrix.json": test_matrix,
-        "priorities.json": priorities,
-        "knowledge-graph.json": graph,
-        "provenance-chains.json": provenance,
-        "provenance-summary.json": provenance_summary,
-        "evidence-report.json": evidence_report,
-        "summary.json": result,
+        "canonical-http.json": canonical, "behavior-model.json": behavior, "anomalies.json": anomalies,
+        "protocol-intelligence.json": protocols, "workflow-model.json": workflow,
+        "workflow-divergences.json": workflow_divergences, "test-matrix.json": test_matrix,
+        "priorities.json": priorities, "knowledge-graph.json": graph, "provenance-chains.json": provenance,
+        "provenance-summary.json": provenance_summary, "evidence-report.json": evidence_report,
+        "correlations.json": correlations, "summary.json": result,
     }
     for filename, payload in artifacts.items():
         (out / filename).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     store = ResearchStore(db_path)
-    run_id = store.create_run({"program": "traffic-analysis-v2.2", "source": str(source)})
+    run_id = store.create_run({"program": "traffic-analysis-v2.3", "source": str(source)})
     try:
         store.checkpoint(run_id, "traffic_ingest", {"count": len(records), "source": str(source)})
         store.checkpoint(run_id, "canonical_http", canonical)
@@ -119,16 +94,13 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
         store.checkpoint(run_id, "knowledge_graph", graph)
         store.checkpoint(run_id, "provenance_chains", provenance)
         store.checkpoint(run_id, "evidence_report", evidence_report)
-        for idx, item in enumerate(anomalies.get("anomalies", [])):
-            store.add_evidence(run_id, f"traffic-anomaly:{idx}", "behavioral_anomaly", item)
-        for idx, item in enumerate(workflow_divergences.get("divergences", [])):
-            store.add_evidence(run_id, f"workflow-divergence:{idx}", "workflow_divergence", item)
-        for idx, item in enumerate(protocols.get("signals", [])):
-            store.add_evidence(run_id, f"protocol-signal:{idx}", "protocol_signal", item)
-        for idx, item in enumerate(priorities.get("targets", [])[:100]):
-            store.add_evidence(run_id, f"priority-target:{idx}", "adaptive_priority", item)
-        for idx, item in enumerate(provenance.get("chains", [])[:200]):
-            store.add_evidence(run_id, f"provenance-chain:{idx}", "evidence_provenance", item)
+        store.checkpoint(run_id, "evidence_correlations", correlations)
+        for idx, item in enumerate(anomalies.get("anomalies", [])): store.add_evidence(run_id, f"traffic-anomaly:{idx}", "behavioral_anomaly", item)
+        for idx, item in enumerate(workflow_divergences.get("divergences", [])): store.add_evidence(run_id, f"workflow-divergence:{idx}", "workflow_divergence", item)
+        for idx, item in enumerate(protocols.get("signals", [])): store.add_evidence(run_id, f"protocol-signal:{idx}", "protocol_signal", item)
+        for idx, item in enumerate(priorities.get("targets", [])[:100]): store.add_evidence(run_id, f"priority-target:{idx}", "adaptive_priority", item)
+        for idx, item in enumerate(provenance.get("chains", [])[:200]): store.add_evidence(run_id, f"provenance-chain:{idx}", "evidence_provenance", item)
+        for idx, item in enumerate(correlations.get("correlations", [])[:200]): store.add_evidence(run_id, f"correlation:{idx}", "evidence_correlation", item)
         store.finish(run_id)
     except Exception:
         store.finish(run_id, "failed")
