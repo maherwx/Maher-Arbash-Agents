@@ -1,0 +1,18 @@
+[Unit]
+Description=Maher Bounty Agents Continuous Analysis Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/maher-bounty-agents
+ExecStart=/opt/maher-bounty-agents/.venv/bin/maher-bounty serve --watch /opt/maher-bounty-agents/incoming --out /opt/maher-bounty-agents/results/continuous --service-db /opt/maher-bounty-agents/.maher/service.db --research-db /opt/maher-bounty-agents/.maher/research.db --workers 2
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
