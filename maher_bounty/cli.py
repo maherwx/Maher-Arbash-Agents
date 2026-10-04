@@ -1,11 +1,11 @@
 import argparse
 import json
 import shutil
-import sys
 from pathlib import Path
 
 from .orchestrator import run
 from .result_store import build_inventory
+from .traffic_ingest import ingest_traffic
 
 
 def doctor():
@@ -33,6 +33,11 @@ def main():
     inv = s.add_parser("inventory", help="Normalize and deduplicate collected recon data")
     inv.add_argument("result_dir")
 
+    traffic = s.add_parser("traffic-import", help="Import Burp XML or HAR/ZAP traffic for analysis")
+    traffic.add_argument("path")
+    traffic.add_argument("--kind", choices=["auto", "burp", "har", "zap"], default="auto")
+    traffic.add_argument("--out", default="results/traffic.json")
+
     s.add_parser("doctor", help="Check local runtimes and research tools")
     a = p.parse_args()
 
@@ -42,6 +47,12 @@ def main():
         data = build_inventory(a.result_dir)
         print(json.dumps(data.get("counts", {}), indent=2))
         print(f"Inventory: {Path(a.result_dir) / 'inventory.json'}")
+        return
+    if a.cmd == "traffic-import":
+        records = ingest_traffic(a.path, a.kind)
+        out = Path(a.out); out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"records": records, "count": len(records)}, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"Imported {len(records)} traffic records: {out}")
         return
     if a.cmd == "run":
         result = run(a.scope, a.rules, a.out, a.inventory)
