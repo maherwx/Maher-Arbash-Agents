@@ -102,78 +102,8 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
     scope = scope if isinstance(scope, dict) else {}
     endpoints = [row.get("value") for row in inventory.get("endpoints", []) if isinstance(row, dict) and row.get("value")]
     assets = scope.get("assets") if isinstance(scope.get("assets"), list) else []
-    exact_assets = []
-    for item in assets:
-        value = item if isinstance(item, str) else (item.get("url") or item.get("host") or item.get("value") or item.get("asset")) if isinstance(item, dict) else None
-        if isinstance(value, str) and value.strip() and not value.strip().startswith("*."):
-            exact_assets.append(value.strip())
-    candidates = [*exact_assets, *([target] if target else []), *endpoints]
+    active_targets, target_rejections = scope_target_urls(scope, inventory, target=target)
+    candidates = [*active_targets, *([target] if target else []), *endpoints]
     fallback_target = target if not assets else None
     allowed_urls, rejected_urls = filter_in_scope_urls(candidates, scope, target=fallback_target)
-    active_targets, target_rejections = scope_target_urls(scope, inventory, target=target)
     rejected_urls = list(dict.fromkeys([*rejected_urls, *target_rejections]))
-
-    scope_review = {
-        "seed_target": target,
-        "authorized_targets": active_targets,
-        "authorized_url_count": len(allowed_urls),
-        "rejected_url_count": len(rejected_urls),
-        "allowed_urls": allowed_urls,
-        "rejected_urls": rejected_urls,
-    }
-    (root / "scope-review.json").write_text(json.dumps(scope_review, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    url_list = root / "targets.txt"
-    url_list.write_text("\n".join(allowed_urls) + ("\n" if allowed_urls else ""), encoding="utf-8")
-    runs = []
-    findings = []
-
-    # Run each active tool against every exact asset or discovered host admitted by the program scope.
-    for scan_target in active_targets:
-        parsed = urlparse(scan_target)
-        host = parsed.hostname or ""
-        label = re.sub(r"[^A-Za-z0-9._-]", "_", parsed.netloc or host) or "target"
-        host_dir = root / "hosts" / label
-        host_dir.mkdir(parents=True, exist_ok=True)
-
-        katana_out = host_dir / "katana.txt"
-        runs.append(_exec(["katana", "-u", scan_target, "-silent", "-d", "3", "-jc", "-fs", "fqdn"], timeout=90, output=katana_out))
-
-        nuclei_out = host_dir / "nuclei.jsonl"
-        runs.append(_exec(["nuclei", "-u", scan_target, "-jsonl", "-severity", "info,low,medium,high,critical", "-o", str(nuclei_out)], timeout=180))
-        findings.extend(_nuclei_findings(nuclei_out))
-
-        nikto_out = host_dir / "nikto.txt"
-        runs.append(_exec(["nikto", "-h", scan_target, "-nointeractive"], timeout=120, output=nikto_out))
-        findings.extend(_nikto_findings(nikto_out, scan_target))
-
-        nmap_out = host_dir / "nmap.txt"
-        runs.append(_exec(["nmap", "-sV", "-Pn", "--top-ports", "100", host], timeout=120, output=nmap_out))
-        tlsx_out = host_dir / "tlsx.txt"
-        runs.append(_exec(["tlsx", "-u", scan_target, "-silent", "-san", "-cn", "-so"], timeout=60, output=tlsx_out))
-
-    if allowed_urls:
-        dalfox_out = root / "dalfox.txt"
-        runs.append(_exec(["dalfox", "file", str(url_list), "--silence"], timeout=120, output=dalfox_out))
-        findings.extend(_dalfox_findings(dalfox_out, target or (active_targets[0] if active_targets else "")))
-
-    unique = _dedupe(findings)
-    summary = {
-        "seed_target": target,
-        "targets": active_targets,
-        "target_count": len(active_targets),
-        "registered": 5 * len(active_targets) + (1 if allowed_urls else 0),
-        "executed": sum(1 for run in runs if run.get("status") != "missing"),
-        "missing": sum(1 for run in runs if run.get("status") == "missing"),
-        "timeouts": sum(1 for run in runs if run.get("status") == "timeout"),
-        "failed": sum(1 for run in runs if run.get("status") == "nonzero"),
-        "raw_findings": len(findings),
-        "unique_findings": len(unique),
-        "scope_review": scope_review,
-        "runs": runs,
-        "findings": unique,
-    }
-    (root / "active-testing.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    (root / "findings.json").write_text(json.dumps(unique, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[EVIDENCE] targets={len(active_targets)} raw={len(findings)} unique={len(unique)}", flush=True)
-    return summary
