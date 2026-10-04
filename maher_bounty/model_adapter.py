@@ -33,6 +33,7 @@ def _configured_endpoints() -> list[dict]:
                         })
         except json.JSONDecodeError:
             pass
+
     legacy_url = os.getenv("MAHER_MODEL_URL", "").strip()
     legacy_model = os.getenv("MAHER_MODEL_ID", "").strip()
     if legacy_url and legacy_model:
@@ -51,14 +52,7 @@ def _configured_endpoints() -> list[dict]:
 
 
 class LocalModelAdapter:
-    """Failover adapter for local/self-hosted OpenAI-compatible model servers.
-
-    Configure one server with MAHER_MODEL_URL + MAHER_MODEL_ID, or a fallback pool
-    with MAHER_MODEL_POOL as JSON:
-    [{"name":"primary","url":"http://127.0.0.1:11434/v1/chat/completions","model":"model-a"}, ...]
-
-    Non-local/public endpoints are ignored by design.
-    """
+    """Failover adapter for local/self-hosted OpenAI-compatible model servers."""
 
     def __init__(self):
         self.endpoints = _configured_endpoints()
@@ -69,7 +63,10 @@ class LocalModelAdapter:
         return {
             "configured": bool(self.endpoints),
             "endpoint_count": len(self.endpoints),
-            "endpoints": [{"name": x["name"], "model": x["model"], "url": x["url"]} for x in self.endpoints],
+            "endpoints": [
+                {"name": x["name"], "model": x["model"], "url": x["url"]}
+                for x in self.endpoints
+            ],
             "local_only": True,
             "last_endpoint": self.last_endpoint,
         }
@@ -77,11 +74,11 @@ class LocalModelAdapter:
     @staticmethod
     def _clean_json(text: str) -> dict:
         text = text.strip()
-        if text.startswith("~~~json"):
+        if text.startswith("```json"):
             text = text[7:]
-        elif text.startswith("~~~"):
+        elif text.startswith("```"):
             text = text[3:]
-        if text.endswith("~~~"):
+        if text.endswith("```"):
             text = text[:-3]
         result = json.loads(text.strip())
         if not isinstance(result, dict):
