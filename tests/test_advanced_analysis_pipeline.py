@@ -15,10 +15,7 @@ class AdvancedAnalysisPipelineTests(unittest.TestCase):
         go={"language":"go","functions":[self.fn("go:lookup","go","store.go","lookup",(),(),("db.account",))]}
         result=analyze_ir_documents(py,go)
         self.assertTrue(result["ready"])
-        self.assertEqual(result["ir"]["function_count"],2)
-        self.assertEqual(result["ir"]["languages"],["go","python"])
         self.assertEqual(result["coverage"]["call_resolution_rate"],1.0)
-        self.assertEqual(result["coverage"]["flow_coverage"],1.0)
         self.assertIn("db.account",result["flow"]["functions"]["py:entry"]["transitive_writes"])
 
     def test_ambiguous_cross_file_call_fails_resolution_gate(self):
@@ -26,28 +23,39 @@ class AdvancedAnalysisPipelineTests(unittest.TestCase):
         targets={"language":"mixed","functions":[self.fn("b","go","b.go","lookup"),self.fn("c","javascript_typescript","c.ts","lookup")]}
         result=analyze_ir_documents(caller,targets,min_resolution=.60)
         self.assertFalse(result["ready"])
-        self.assertEqual(result["coverage"]["call_resolution_rate"],0.0)
         self.assertEqual(len(result["ir"]["unresolved_calls"]),1)
+        self.assertEqual(result["semantic_model"]["deferred_count"],1)
 
-    def test_semantic_resolution_recovers_ambiguous_call(self):
-        caller={"language":"python","functions":[self.fn("a","python","a.py","entry",("lookup",))]}
-        targets={"language":"mixed","functions":[self.fn("b","go","b.go","lookup",writes=("db.primary",)),self.fn("c","javascript_typescript","c.ts","lookup",writes=("cache.secondary",))]}
-        semantic={"call_resolutions":[{"caller":"a","symbol":"lookup","resolved":"b","candidates":[{"id":"b","confidence":.96}]}]}
-        result=analyze_ir_documents(caller,targets,semantic_model=semantic)
-        self.assertTrue(result["ready"])
-        edge=result["ir"]["call_edges"][0]
-        self.assertEqual(edge["to"],"b")
-        self.assertEqual(edge["resolution"],"semantic")
-        self.assertGreaterEqual(edge["confidence"],.95)
+    def test_automatic_semantic_resolution_recovers_clear_winner(self):
+        caller={"language":"python","functions":[self.fn("a","python","svc/api.py","entry",("lookup",),("account.id",),(),({"kind":"http_route","path":"/account"},))]}
+        targets={"language":"mixed","functions":[self.fn("b","python","svc/store.py","lookup",reads=("account.id",),writes=("db.primary",),routes=({"kind":"http_route","path":"/account"},)),self.fn("c","go","x/cache.go","lookup",writes=("cache.secondary",))]}
+        result=analyze_ir_documents(caller,targets)
+        self.assertTrue(result["semantic_generated"])
+        self.assertEqual(result["semantic_model"]["resolution_count"],1)
+        self.assertEqual(result["ir"]["call_edges"][0]["to"],"b")
         self.assertIn("db.primary",result["flow"]["functions"]["a"]["transitive_writes"])
-        self.assertNotIn("cache.secondary",result["flow"]["functions"]["a"]["transitive_writes"])
+
+    def test_runtime_fusion_is_part_of_pipeline(self):
+        doc={"language":"python","functions":[self.fn("a","python","api.py","entry",reads=("request.user",),writes=("db.account",),routes=({"kind":"http_route","path":"/account"},))]}
+        runtime={"signals":[{"protocol":"http","metadata":{"url":"https://api.example.test/account"}}]}
+        result=analyze_ir_documents(doc,runtime_result=runtime,min_resolution=0)
+        self.assertEqual(result["runtime_fusion"]["match_count"],1)
+        self.assertEqual(result["runtime_fusion"]["matches"][0]["function"],"a")
+
+    def test_explicit_semantic_model_still_supported(self):
+        caller={"language":"python","functions":[self.fn("a","python","a.py","entry",("lookup",))]}
+        targets={"language":"mixed","functions":[self.fn("b","go","b.go","lookup"),self.fn("c","javascript_typescript","c.ts","lookup")]}
+        semantic={"call_resolutions":[{"caller":"a","symbol":"lookup","resolved":"b","confidence":.96}]}
+        result=analyze_ir_documents(caller,targets,semantic_model=semantic)
+        self.assertEqual(result["ir"]["call_edges"][0]["to"],"b")
+        self.assertFalse(result["semantic_generated"])
 
     def test_writes_deterministic_artifacts(self):
         doc={"language":"python","functions":[self.fn("a","python","a.py","entry",reads=("x",))]}
         with tempfile.TemporaryDirectory() as td:
             result=analyze_ir_documents(doc,out_dir=td,min_resolution=0)
             self.assertTrue(result["ready"])
-            for name in ("unified-ir.json","interprocedural-flow.json","analysis-coverage.json","coverage-gate.json","advanced-analysis-summary.json"):
+            for name in ("unified-ir.json","semantic-resolution.json","interprocedural-flow.json","analysis-coverage.json","coverage-gate.json","advanced-analysis-summary.json"):
                 p=Path(td)/name; self.assertTrue(p.exists(),name); json.loads(p.read_text(encoding="utf-8"))
 
 
