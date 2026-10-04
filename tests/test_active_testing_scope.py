@@ -32,6 +32,34 @@ class ActiveTestingScopeTests(unittest.TestCase):
         self.assertEqual(target_lines, ["https://app.example.test", "https://app.example.test/login"])
         self.assertEqual(result["scope_review"]["rejected_url_count"], 2)
 
+    def test_active_checks_cover_all_wildcard_hosts_and_skip_exclusions(self):
+        commands = []
+
+        def fake_exec(cmd, *, timeout, output=None):
+            commands.append(cmd)
+            return {"tool": cmd[0], "status": "missing", "command": cmd}
+
+        inventory = {
+            "hosts": [
+                {"value": "app.example.test"},
+                {"value": "api.example.test"},
+                {"value": "admin.example.test"},
+            ],
+            "endpoints": [
+                {"value": "https://app.example.test/login"},
+                {"value": "https://api.example.test/v1"},
+                {"value": "https://admin.example.test/"},
+            ],
+        }
+        scope = {"assets": ["*.example.test"], "out_of_scope": ["admin.example.test"]}
+        with tempfile.TemporaryDirectory() as temp, patch("maher_bounty.active_testing._exec", side_effect=fake_exec):
+            result = run_active_testing("example.test", inventory, temp, scope=scope)
+
+        self.assertEqual(result["targets"], ["https://app.example.test", "https://api.example.test"])
+        katana_targets = [cmd[cmd.index("-u") + 1] for cmd in commands if cmd[0] == "katana"]
+        self.assertEqual(katana_targets, result["targets"])
+        self.assertEqual(result["scope_review"]["rejected_url_count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
