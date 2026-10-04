@@ -6,11 +6,20 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .result_store import build_inventory
+from .result_store import build_inventory, stable_id
 
 
 PASSIVE_TOOLS = ("subfinder","assetfinder","waybackurls","gau","httpx","whatweb","wafw00f")
 ACTIVE_DISCOVERY_TOOLS = ("dnsx","katana","tlsx","nmap","naabu","ffuf","gobuster","nikto","nuclei","dalfox","alterx","hakrawler")
+PASSIVE_TIMEOUTS = {
+    "subfinder": 25,
+    "assetfinder": 20,
+    "waybackurls": 20,
+    "gau": 25,
+    "httpx": 30,
+    "whatweb": 20,
+    "wafw00f": 20,
+}
 
 
 def _domain(target: str) -> str:
@@ -22,10 +31,21 @@ def _domain(target: str) -> str:
     return host
 
 
-def _run(cmd: list[str], *, stdout_path: Path | None=None, timeout: int=180) -> dict:
+def _normalized_url(target: str) -> str:
+    raw=target.strip()
+    if "://" not in raw:
+        raw="https://"+raw
+    parsed=urlparse(raw)
+    if not parsed.hostname:
+        raise ValueError(f"invalid target: {target!r}")
+    return raw
+
+
+def _run(cmd: list[str], *, stdout_path: Path | None=None, timeout: int=30) -> dict:
     executable=cmd[0]
     if not shutil.which(executable):
         return {"tool":executable,"status":"missing","command":cmd}
+    print(f"[tool] {executable} started (timeout={timeout}s)", flush=True)
     try:
         if stdout_path:
             stdout_path.parent.mkdir(parents=True,exist_ok=True)
@@ -33,8 +53,11 @@ def _run(cmd: list[str], *, stdout_path: Path | None=None, timeout: int=180) -> 
                 cp=subprocess.run(cmd,stdout=fh,stderr=subprocess.PIPE,text=True,timeout=timeout,check=False)
         else:
             cp=subprocess.run(cmd,capture_output=True,text=True,timeout=timeout,check=False)
-        return {"tool":executable,"status":"ok" if cp.returncode==0 else "nonzero","returncode":cp.returncode,"stderr":(cp.stderr or "")[-2000:],"command":cmd}
+        status="ok" if cp.returncode==0 else "nonzero"
+        print(f"[tool] {executable} {status}", flush=True)
+        return {"tool":executable,"status":status,"returncode":cp.returncode,"stderr":(cp.stderr or "")[-2000:],"command":cmd}
     except subprocess.TimeoutExpired:
+        print(f"[tool] {executable} timed out; continuing", flush=True)
         return {"tool":executable,"status":"timeout","command":cmd}
 
 
@@ -53,42 +76,59 @@ def plan_tools(target: str, rules: dict | None=None) -> dict:
 def collect_target_inventory(target: str, out_dir: str | Path, *, rules: dict | None=None) -> dict:
     root=Path(out_dir)
     root.mkdir(parents=True,exist_ok=True)
+    target_url=_normalized_url(target)
     domain=_domain(target)
-    plan=plan_tools(target,rules)
+    plan=plan_tools(target_url,rules)
     runs=[]
 
-    runs.append(_run(["subfinder","-silent","-d",domain],stdout_path=root/"subfinder.txt"))
-    runs.append(_run(["assetfinder","--subs-only",domain],stdout_path=root/"assetfinder.txt"))
-    runs.append(_run(["waybackurls",domain],stdout_path=root/"wayback.txt"))
-    runs.append(_run(["gau","--subs",domain],stdout_path=root/"gau.txt"))
+    print(f"[1/5] Target accepted: {target_url}", flush=True)
+    print("[2/5] Collecting passive reconnaissance", flush=True)
+    passive_jobs = [
+        (["subfinder","-silent","-d",domain], root/"subfinder.txt"),
+        (["assetfinder","--subs-only",domain], root/"assetfinder.txt"),
+        (["waybackurls",domain], root/"wayback.txt"),
+        (["gau","--subs",domain], root/"gau.txt"),
+    ]
+    for cmd, output in passive_jobs:
+        runs.append(_run(cmd, stdout_path=output, timeout=PASSIVE_TIMEOUTS[cmd[0]]))
 
-    subs=set()
+    subs={domain}
     for p in (root/"subfinder.txt",root/"assetfinder.txt"):
         if p.exists():
             subs.update(x.strip() for x in p.read_text(encoding="utf-8",errors="ignore").splitlines() if x.strip())
-    if not subs:
-        subs.add(domain)
     (root/"subdomains.txt").write_text("\n".join(sorted(subs))+"\n",encoding="utf-8")
 
-    archives=set()
+    archives={target_url}
     for p in (root/"wayback.txt",root/"gau.txt"):
         if p.exists():
             archives.update(x.strip() for x in p.read_text(encoding="utf-8",errors="ignore").splitlines() if x.strip())
-    (root/"archive-urls.txt").write_text("\n".join(sorted(archives))+("\n" if archives else ""),encoding="utf-8")
+    (root/"archive-urls.txt").write_text("\n".join(sorted(archives))+"\n",encoding="utf-8")
 
+    print("[3/5] Probing discovered web targets", flush=True)
     if shutil.which("httpx"):
-        runs.append(_run(["httpx","-silent","-l",str(root/"subdomains.txt"),"-status-code","-title","-tech-detect","-json","-o",str(root/"httpx.jsonl")]))
+        runs.append(_run(
+            ["httpx","-silent","-l",str(root/"subdomains.txt"),"-status-code","-title","-tech-detect","-json","-o",str(root/"httpx.jsonl")],
+            timeout=PASSIVE_TIMEOUTS["httpx"],
+        ))
 
     metadata=[]
     for tool in ("whatweb","wafw00f"):
         if shutil.which(tool):
-            metadata.append(_run([tool,target]))
+            metadata.append(_run([tool,target_url], timeout=PASSIVE_TIMEOUTS[tool]))
     plan["runs"]=runs
     plan["metadata_runs"]=metadata
 
+    print("[4/5] Building normalized inventory", flush=True)
     inventory=build_inventory(root)
-    inventory["target"]=target
+
+    # Always seed the exact supplied target, even if passive sources return no data.
+    if not any(x.get("value")==target_url for x in inventory.get("endpoints",[])):
+        inventory.setdefault("endpoints",[]).insert(0,{"id":stable_id("url",target_url),"value":target_url})
+    inventory.setdefault("counts",{})["endpoints"]=len(inventory.get("endpoints",[]))
+    inventory["target"]=target_url
     inventory["tool_plan"]=plan
+
     (root/"tool-orchestration.json").write_text(json.dumps(plan,ensure_ascii=False,indent=2),encoding="utf-8")
     (root/"inventory.json").write_text(json.dumps(inventory,ensure_ascii=False,indent=2),encoding="utf-8")
+    print(f"[5/5] Inventory ready: {inventory.get('counts',{})}", flush=True)
     return inventory
