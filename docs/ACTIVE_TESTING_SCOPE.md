@@ -18,4 +18,4 @@ An exact host rule covers that host only. A wildcard such as `*.api.example.test
 
 Only HTTP and HTTPS URLs without embedded credentials are passed through the URL scope filter. Discovered endpoints outside the allowlist, malformed URLs, unsupported schemes, and URLs with userinfo are rejected. The run writes `scope-review.json` under the active-testing output folder with the allowed and rejected URL candidates for audit.
 
-The current active-testing stage sends the supplied target to the bounded crawl and service checks. It passes only filtered in-scope inventory URLs to the parameter-analysis input file. A scope decision is not proof of ownership or permission; run active checks only for assets covered by the user's authorization.
+The crawler is explicitly limited to the target's fully qualified domain name (FQDN); it does not inherit Katana's broader default that can include sibling subdomains. The parameter-analysis input contains only filtered, in-scope inventory URLs. A scope decision is not proof of ownership or permission; run active checks only for assets covered by the user's authorization.
