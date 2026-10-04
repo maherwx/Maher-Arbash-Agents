@@ -133,11 +133,15 @@ def main():
         return
     if a.cmd == "auto-run":
         result = run_target(a.target, a.rules, a.out, authorized=a.authorized)
+        active = result.get("active_testing", {})
         print(json.dumps({
             "target": a.target,
             "inventory_counts": result.get("inventory_counts", {}),
             "agent_count": result.get("agent_count", 0),
             "active_discovery_enabled": result.get("tool_plan", {}).get("active_discovery_enabled", False),
+            "active_testing_status": active.get("status", "completed" if active else "skipped"),
+            "findings_count": active.get("unique_findings", len(active.get("findings", []))),
+            "missing_tools": active.get("missing", 0),
             "out": a.out,
         }, indent=2))
 
