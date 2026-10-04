@@ -1,7 +1,6 @@
 from pathlib import Path
 import json
 import os
-import tempfile
 import yaml
 from .model_adapter import LocalModelAdapter
 from .hypothesis_engine import build_hypotheses
@@ -12,6 +11,7 @@ from .knowledge_graph import build_application_graph
 from .persistence import ResearchStore
 from .native_engines import run_native_engines
 from .tool_orchestration import collect_target_inventory
+from .active_testing import run_active_testing
 
 
 def load_agents():
@@ -59,10 +59,17 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
     run_id = store.create_run(scope)
     try:
         inventory = load_inventory(scope, inventory_path)
+        active_testing = {}
         if target and not inventory_path:
             recon_dir = out / "recon"
             inventory = collect_target_inventory(target, recon_dir, rules=rules)
             inventory["source_file"] = str(recon_dir / "inventory.json")
+            if rules.get("allow_active_discovery", False):
+                print("[active] Starting authorized non-destructive testing", flush=True)
+                active_testing = run_active_testing(target, inventory, out / "active")
+                store.checkpoint(run_id, "active_testing", active_testing)
+            else:
+                print("[active] Disabled by rules", flush=True)
 
         print("[analysis] Building hypotheses and application graph", flush=True)
         context_inventory = compact_inventory(inventory)
@@ -92,9 +99,11 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 result = model.analyze(agent, {
                     "scope": scope, "rules": rules, "inventory": context_inventory,
                     "architecture_topology": topology, "application_graph": graph,
-                    "native_engine_analysis": native, "hypotheses": hypotheses,
-                    "prior_agent_evidence": prior_evidence, "research_directives": directives,
-                    "research_method": {"mode": "collaborative_hypothesis_driven", "wave": wave_index, "principles": directives["directives"]},
+                    "native_engine_analysis": native, "active_testing": active_testing,
+                    "active_findings": active_testing.get("findings", []),
+                    "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
+                    "research_directives": directives,
+                    "research_method": {"mode": "collaborative_evidence_driven", "wave": wave_index, "principles": directives["directives"]},
                 })
                 current.append(result)
                 store.add_evidence(run_id, result.get("agent", "unknown"), "agent_result", result)
@@ -108,7 +117,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         payload = {
             "run_id": run_id, "scope": scope, "rules": rules,
             "inventory_counts": inventory.get("counts", {}), "inventory_source": source_file,
-            "tool_plan": inventory.get("tool_plan", {}),
+            "tool_plan": inventory.get("tool_plan", {}), "active_testing": active_testing,
             "hypothesis_count": len(hypotheses), "hypotheses": hypotheses,
             "application_graph_stats": graph.get("stats", {}), "native_engines": native,
             "collaboration_waves": wave_summary, "agent_count": len(results), "results": results,
@@ -142,7 +151,7 @@ def run_target(target: str, rules_path: str | None=None, out_dir="results/auto",
             "no_denial_of_service": True,
             "no_persistence": True,
             "report_evidence": True,
-            "allow_active_discovery": False,
+            "allow_active_discovery": True,
         }
     scope={"program":"Authorized target assessment","assets":[target],"out_of_scope":[]}
     return _run_loaded(scope, rules, out_dir, target=target)
