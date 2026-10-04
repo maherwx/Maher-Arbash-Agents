@@ -12,27 +12,45 @@ from .scope_policy import filter_in_scope_urls, scope_target_urls
 from .tool_advisor import recommend_tools
 
 
+def _tail(value, limit: int = 3000) -> str:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return str(value or "")[-limit:]
+
+
 def _exec(cmd: list[str], *, timeout: int, output: Path | None = None) -> dict:
     tool = cmd[0]
     if not shutil.which(tool):
-        return {"tool": tool, "status": "missing", "command": cmd, "findings": 0}
+        return {"tool": tool, "status": "missing", "command": cmd, "findings": 0, "stderr_tail": ""}
     print(f"[ACTIVE] {tool:<12} RUN timeout={timeout}s", flush=True)
     try:
         cp = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-        text = (cp.stdout or "") + ("\n" + cp.stderr if cp.stderr else "")
+        combined = (cp.stdout or "") + ("\n" + cp.stderr if cp.stderr else "")
         if output:
             output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_text(text, encoding="utf-8", errors="ignore")
+            output.write_text(combined, encoding="utf-8", errors="ignore")
         status = "ok" if cp.returncode == 0 else "nonzero"
+        stderr_tail = _tail(cp.stderr)
+        stdout_tail = _tail(cp.stdout, 1000)
         print(f"[ACTIVE] {tool:<12} {status.upper()}", flush=True)
-        return {"tool": tool, "status": status, "returncode": cp.returncode, "command": cmd, "output": str(output) if output else None}
+        if status != "ok" and (stderr_tail or stdout_tail):
+            diagnostic = (stderr_tail or stdout_tail).replace("\n", " ")[:400]
+            print(f"[ACTIVE] {tool:<12} ERROR: {diagnostic}", flush=True)
+        return {
+            "tool": tool, "status": status, "returncode": cp.returncode, "command": cmd,
+            "output": str(output) if output else None, "stderr_tail": stderr_tail, "stdout_tail": stdout_tail,
+        }
     except subprocess.TimeoutExpired as exc:
-        partial = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
-        if output and partial:
+        partial = _tail(exc.stdout)
+        stderr_tail = _tail(exc.stderr)
+        if output and (partial or stderr_tail):
             output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_text(partial, encoding="utf-8", errors="ignore")
+            output.write_text(partial + ("\n" + stderr_tail if stderr_tail else ""), encoding="utf-8", errors="ignore")
         print(f"[ACTIVE] {tool:<12} TIMEOUT; continuing", flush=True)
-        return {"tool": tool, "status": "timeout", "command": cmd, "output": str(output) if output else None}
+        return {
+            "tool": tool, "status": "timeout", "command": cmd, "output": str(output) if output else None,
+            "stderr_tail": stderr_tail, "stdout_tail": partial[-1000:],
+        }
 
 
 def _nuclei_findings(path: Path) -> list[dict]:
