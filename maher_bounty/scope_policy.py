@@ -17,10 +17,8 @@ def _values(raw) -> list[str]:
     return values
 
 
-def _host_rule(raw: str):
+def _parsed_rule(raw: str):
     value = raw.strip().lower()
-    if not value:
-        return None
     wildcard = value.startswith("*.")
     if wildcard:
         value = value[2:]
@@ -29,7 +27,14 @@ def _host_rule(raw: str):
     if host.startswith("*."):
         wildcard = True
         host = host[2:]
-    return (host, wildcard) if host else None
+    if not host:
+        return None
+    scheme = parsed.scheme.lower() if parsed.scheme.lower() in {"http", "https"} else "https"
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    return host, wildcard, scheme, port
 
 
 def _host_from_url(value: str) -> str | None:
@@ -61,11 +66,19 @@ def is_in_scope_url(value: str, scope: dict | None = None, *, target: str | None
     allow_values = _values(scope.get("assets"))
     if target:
         allow_values.append(target)
-    allowed = [p for raw in allow_values if (p := _host_rule(raw))]
+    allowed = []
+    for raw in allow_values:
+        parsed = _parsed_rule(raw)
+        if parsed:
+            allowed.append((parsed[0], parsed[1]))
     if not any(_matches(host, pattern) for pattern in allowed):
         return False
 
-    excluded = [p for raw in _values(scope.get("out_of_scope")) if (p := _host_rule(raw))]
+    excluded = []
+    for raw in _values(scope.get("out_of_scope")):
+        parsed = _parsed_rule(raw)
+        if parsed:
+            excluded.append((parsed[0], parsed[1]))
     return not any(_matches(host, pattern) for pattern in excluded)
 
 
@@ -80,3 +93,81 @@ def filter_in_scope_urls(values, scope: dict | None = None, *, target: str | Non
             seen.add(candidate)
             (allowed if is_in_scope_url(candidate, scope, target=target) else rejected).append(candidate)
     return allowed, rejected
+
+
+def scope_seed_targets(scope: dict | None, *, target: str | None = None) -> list[str]:
+    """Return distinct enumeration seeds while skipping explicitly excluded hosts."""
+    scope = scope if isinstance(scope, dict) else {}
+    values = _values(scope.get("assets"))
+    if target:
+        values.insert(0, target)
+    excluded = []
+    for raw in _values(scope.get("out_of_scope")):
+        parsed = _parsed_rule(raw)
+        if parsed:
+            excluded.append((parsed[0], parsed[1]))
+    seeds, seen = [], set()
+    for raw in values:
+        parsed = _parsed_rule(raw)
+        if not parsed:
+            continue
+        host, _, scheme, port = parsed
+        if any(_matches(host, pattern) for pattern in excluded):
+            continue
+        authority = f"[{host}]" if ":" in host else host
+        if port:
+            authority = f"{authority}:{port}"
+        url = f"{scheme}://{authority}"
+        if url not in seen:
+            seen.add(url)
+            seeds.append(url)
+    return seeds
+
+
+def scope_target_urls(scope: dict | None, inventory: dict | None, *, target: str | None = None) -> tuple[list[str], list[str]]:
+    """Build all explicitly authorized HTTP(S) origins from scope and discovered inventory."""
+    scope = scope if isinstance(scope, dict) else {}
+    inventory = inventory if isinstance(inventory, dict) else {}
+    candidates = []
+    asset_values = _values(scope.get("assets"))
+    for raw in asset_values:
+        parsed = _parsed_rule(raw)
+        if not parsed or parsed[1]:
+            continue
+        host, _, scheme, port = parsed
+        authority = f"[{host}]" if ":" in host else host
+        if port:
+            authority = f"{authority}:{port}"
+        candidates.append(f"{scheme}://{authority}")
+    if target:
+        candidates.append(target)
+    for row in inventory.get("hosts", []):
+        value = row if isinstance(row, str) else row.get("value") or row.get("host") if isinstance(row, dict) else None
+        if isinstance(value, str) and value.strip() and not value.strip().startswith("*."):
+            candidates.append(value.strip() if "://" in value else "https://" + value.strip())
+    for row in inventory.get("endpoints", []):
+        value = row if isinstance(row, str) else row.get("value") or row.get("url") if isinstance(row, dict) else None
+        if isinstance(value, str):
+            candidates.append(value)
+
+    fallback_target = target if not asset_values else None
+    allowed, rejected = filter_in_scope_urls(candidates, scope, target=fallback_target)
+    origins, seen = [], set()
+    for value in allowed:
+        parsed = urlparse(value if "://" in value else "https://" + value)
+        host = (parsed.hostname or "").lower()
+        if not host:
+            continue
+        scheme = parsed.scheme.lower() if parsed.scheme.lower() in {"http", "https"} else "https"
+        authority = f"[{host}]" if ":" in host else host
+        try:
+            port = parsed.port
+        except ValueError:
+            continue
+        if port:
+            authority = f"{authority}:{port}"
+        origin = f"{scheme}://{authority}"
+        if origin not in seen:
+            seen.add(origin)
+            origins.append(origin)
+    return origins, rejected

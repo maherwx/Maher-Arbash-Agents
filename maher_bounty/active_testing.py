@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .scope_policy import filter_in_scope_urls
+from .scope_policy import filter_in_scope_urls, scope_target_urls
 
 
 def _exec(cmd: list[str], *, timeout: int, output: Path | None = None) -> dict:
     tool = cmd[0]
-    path = shutil.which(tool)
-    if not path:
+    if not shutil.which(tool):
         return {"tool": tool, "status": "missing", "command": cmd, "findings": 0}
     print(f"[ACTIVE] {tool:<12} RUN timeout={timeout}s", flush=True)
     try:
@@ -61,12 +61,12 @@ def _nikto_findings(path: Path, target: str) -> list[dict]:
         return []
     findings = []
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        s = line.strip()
-        if not s.startswith("+"):
+        value = line.strip()
+        if not value.startswith("+"):
             continue
-        if any(x in s.lower() for x in ("target ip", "target hostname", "target port", "start time", "end time", "server:")):
+        if any(x in value.lower() for x in ("target ip", "target hostname", "target port", "start time", "end time", "server:")):
             continue
-        findings.append({"source": "nikto", "title": s.lstrip("+ ")[:180], "severity": "info", "target": target, "evidence": s, "validated": False})
+        findings.append({"source": "nikto", "title": value.lstrip("+ ")[:180], "severity": "info", "target": target, "evidence": value, "validated": False})
     return findings
 
 
@@ -83,79 +83,85 @@ def _dalfox_findings(path: Path, target: str) -> list[dict]:
 
 def _dedupe(findings: list[dict]) -> list[dict]:
     merged = {}
-    for f in findings:
-        key = (str(f.get("title", "")).lower(), str(f.get("target", "")).lower())
+    for finding in findings:
+        key = (str(finding.get("title", "")).lower(), str(finding.get("target", "")).lower())
         if key not in merged:
-            merged[key] = dict(f, sources=[f.get("source")])
+            merged[key] = dict(finding, sources=[finding.get("source")])
         else:
             sources = merged[key].setdefault("sources", [])
-            if f.get("source") not in sources:
-                sources.append(f.get("source"))
-            merged[key]["validated"] = bool(merged[key].get("validated") or f.get("validated"))
+            if finding.get("source") not in sources:
+                sources.append(finding.get("source"))
+            merged[key]["validated"] = bool(merged[key].get("validated") or finding.get("validated"))
     return list(merged.values())
 
 
-def run_active_testing(target: str, inventory: dict, out_dir: str | Path, *, scope: dict | None = None) -> dict:
+def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path, *, scope: dict | None = None) -> dict:
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
-    parsed = urlparse(target if "://" in target else "https://" + target)
-    host = parsed.hostname or target
-    endpoints = [x.get("value") for x in inventory.get("endpoints", []) if isinstance(x, dict) and x.get("value")]
-    in_scope, rejected = filter_in_scope_urls([target, *endpoints], scope, target=target)
-    normalized_target = next((url for url in in_scope if urlparse(url if "://" in url else "https://" + url).hostname == host), None)
-    if normalized_target is None:
-        raise ValueError("active testing target is not permitted by the supplied scope")
+    inventory = inventory if isinstance(inventory, dict) else {}
+    scope = scope if isinstance(scope, dict) else {}
+    endpoints = [row.get("value") for row in inventory.get("endpoints", []) if isinstance(row, dict) and row.get("value")]
+    assets = scope.get("assets") if isinstance(scope.get("assets"), list) else []
+    active_targets, target_rejections = scope_target_urls(scope, inventory, target=target)
+    candidates = [*active_targets, *([target] if target else []), *endpoints]
+    fallback_target = target if not assets else None
+    allowed_urls, rejected_urls = filter_in_scope_urls(candidates, scope, target=fallback_target)
+    rejected_urls = list(dict.fromkeys([*rejected_urls, *target_rejections]))
 
-    # Persist the scope decision so every discarded endpoint is auditable.
     scope_review = {
-        "target": target,
-        "allowed_url_count": min(len(in_scope), 1000),
-        "rejected_url_count": len(rejected),
-        "allowed_urls": in_scope[:1000],
-        "rejected_urls": rejected[:1000],
+        "seed_target": target,
+        "authorized_targets": active_targets,
+        "authorized_url_count": len(allowed_urls),
+        "rejected_url_count": len(rejected_urls),
+        "allowed_urls": allowed_urls,
+        "rejected_urls": rejected_urls,
     }
     (root / "scope-review.json").write_text(json.dumps(scope_review, ensure_ascii=False, indent=2), encoding="utf-8")
 
     url_list = root / "targets.txt"
-    url_list.write_text("\n".join(in_scope[:1000]) + "\n", encoding="utf-8")
-
+    url_list.write_text("\n".join(allowed_urls) + ("\n" if allowed_urls else ""), encoding="utf-8")
     runs = []
     findings = []
 
-    # Restrict crawling to the exact authorized FQDN; Katana defaults to the root domain and sibling subdomains.
-    katana_out = root / "katana.txt"
-    runs.append(_exec(["katana", "-u", normalized_target, "-silent", "-d", "3", "-jc", "-fs", "fqdn"], timeout=90, output=katana_out))
+    # Run each active tool against every asset admitted by the program scope.
+    for scan_target in active_targets:
+        parsed = urlparse(scan_target)
+        host = parsed.hostname or ""
+        label = re.sub(r"[^A-Za-z0-9._-]", "_", parsed.netloc or host) or "target"
+        host_dir = root / "hosts" / label
+        host_dir.mkdir(parents=True, exist_ok=True)
 
-    # Template-driven checks produce structured evidence suitable for correlation.
-    nuclei_out = root / "nuclei.jsonl"
-    runs.append(_exec(["nuclei", "-u", normalized_target, "-jsonl", "-severity", "info,low,medium,high,critical", "-o", str(nuclei_out)], timeout=180))
-    findings.extend(_nuclei_findings(nuclei_out))
+        katana_out = host_dir / "katana.txt"
+        runs.append(_exec(["katana", "-u", scan_target, "-silent", "-d", "3", "-jc", "-fs", "fqdn"], timeout=90, output=katana_out))
 
-    # Web server/configuration checks.
-    nikto_out = root / "nikto.txt"
-    runs.append(_exec(["nikto", "-h", normalized_target, "-nointeractive"], timeout=120, output=nikto_out))
-    findings.extend(_nikto_findings(nikto_out, normalized_target))
+        nuclei_out = host_dir / "nuclei.jsonl"
+        runs.append(_exec(["nuclei", "-u", scan_target, "-jsonl", "-severity", "info,low,medium,high,critical", "-o", str(nuclei_out)], timeout=180))
+        findings.extend(_nuclei_findings(nuclei_out))
 
-    # Parameter-aware XSS analysis over explicitly in-scope URLs only.
-    dalfox_out = root / "dalfox.txt"
-    if in_scope:
+        nikto_out = host_dir / "nikto.txt"
+        runs.append(_exec(["nikto", "-h", scan_target, "-nointeractive"], timeout=120, output=nikto_out))
+        findings.extend(_nikto_findings(nikto_out, scan_target))
+
+        nmap_out = host_dir / "nmap.txt"
+        runs.append(_exec(["nmap", "-sV", "-Pn", "--top-ports", "100", host], timeout=120, output=nmap_out))
+        tlsx_out = host_dir / "tlsx.txt"
+        runs.append(_exec(["tlsx", "-u", scan_target, "-silent", "-san", "-cn", "-so"], timeout=60, output=tlsx_out))
+
+    if allowed_urls:
+        dalfox_out = root / "dalfox.txt"
         runs.append(_exec(["dalfox", "file", str(url_list), "--silence"], timeout=120, output=dalfox_out))
-        findings.extend(_dalfox_findings(dalfox_out, normalized_target))
-
-    # Network/TLS/service evidence without destructive NSE scripts.
-    nmap_out = root / "nmap.txt"
-    runs.append(_exec(["nmap", "-sV", "-Pn", "--top-ports", "100", host], timeout=120, output=nmap_out))
-    tlsx_out = root / "tlsx.txt"
-    runs.append(_exec(["tlsx", "-u", normalized_target, "-silent", "-san", "-cn", "-so"], timeout=60, output=tlsx_out))
+        findings.extend(_dalfox_findings(dalfox_out, target or (active_targets[0] if active_targets else "")))
 
     unique = _dedupe(findings)
     summary = {
-        "target": target,
-        "registered": 6,
-        "executed": sum(1 for r in runs if r.get("status") != "missing"),
-        "missing": sum(1 for r in runs if r.get("status") == "missing"),
-        "timeouts": sum(1 for r in runs if r.get("status") == "timeout"),
-        "failed": sum(1 for r in runs if r.get("status") == "nonzero"),
+        "seed_target": target,
+        "targets": active_targets,
+        "target_count": len(active_targets),
+        "registered": 5 * len(active_targets) + (1 if allowed_urls else 0),
+        "executed": sum(1 for run in runs if run.get("status") != "missing"),
+        "missing": sum(1 for run in runs if run.get("status") == "missing"),
+        "timeouts": sum(1 for run in runs if run.get("status") == "timeout"),
+        "failed": sum(1 for run in runs if run.get("status") == "nonzero"),
         "raw_findings": len(findings),
         "unique_findings": len(unique),
         "scope_review": scope_review,
@@ -164,5 +170,5 @@ def run_active_testing(target: str, inventory: dict, out_dir: str | Path, *, sco
     }
     (root / "active-testing.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     (root / "findings.json").write_text(json.dumps(unique, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[EVIDENCE] raw={len(findings)} unique={len(unique)}", flush=True)
+    print(f"[EVIDENCE] targets={len(active_targets)} raw={len(findings)} unique={len(unique)}", flush=True)
     return summary

@@ -1,6 +1,6 @@
 import unittest
 
-from maher_bounty.scope_policy import filter_in_scope_urls, is_in_scope_url
+from maher_bounty.scope_policy import filter_in_scope_urls, is_in_scope_url, scope_seed_targets, scope_target_urls
 
 
 class ScopePolicyTests(unittest.TestCase):
@@ -36,6 +36,23 @@ class ScopePolicyTests(unittest.TestCase):
         )
         self.assertEqual(allowed, ["https://example.test/"])
         self.assertEqual(rejected, ["https://other.test/"])
+
+    def test_wildcard_scope_discovers_and_admits_all_matching_hosts(self):
+        scope = {"assets": ["*.example.test"], "out_of_scope": ["admin.example.test"]}
+        inventory = {"hosts": [
+            {"value": "app.example.test"},
+            {"value": "api.example.test"},
+            {"value": "admin.example.test"},
+            {"value": "outside.test"},
+        ]}
+        targets, _ = scope_target_urls(scope, inventory, target="example.test")
+        self.assertEqual(targets, ["https://app.example.test", "https://api.example.test"])
+
+    def test_seed_targets_include_wildcard_parent_for_passive_enumeration(self):
+        self.assertEqual(
+            scope_seed_targets({"assets": ["*.example.test", "https://app.other.test"]}),
+            ["https://example.test", "https://app.other.test"],
+        )
 
 
 if __name__ == "__main__":
