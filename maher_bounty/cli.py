@@ -44,6 +44,7 @@ def main():
     r.add_argument("--rules", required=True)
     r.add_argument("--out", default="reports")
     r.add_argument("--inventory", default=None, help="Normalized inventory.json to feed the research engine")
+    r.add_argument("--authorized", action="store_true", help="Confirm permission for active checks against the supplied scope")
 
     auto = s.add_parser("auto-run", help="Collect target inventory and run the full collaborative pipeline")
     auto.add_argument("--target", required=True, help="Authorized website/domain target")
@@ -125,15 +126,22 @@ def main():
         return
     if a.cmd == "run":
         result = run(a.scope, a.rules, a.out, a.inventory, authorized=a.authorized)
-        print(f"Completed {result['agent_count']} agent passes. Reports: {a.out}")
+        active = result.get("active_testing", {})
+        status = active.get("status", "completed" if active else "skipped")
+        findings = active.get("unique_findings", len(active.get("findings", [])))
+        print(f"Completed {result['agent_count']} agent passes; active_testing={status}; findings={findings}. Reports: {a.out}")
         return
     if a.cmd == "auto-run":
         result = run_target(a.target, a.rules, a.out, authorized=a.authorized)
+        active = result.get("active_testing", {})
         print(json.dumps({
             "target": a.target,
             "inventory_counts": result.get("inventory_counts", {}),
             "agent_count": result.get("agent_count", 0),
             "active_discovery_enabled": result.get("tool_plan", {}).get("active_discovery_enabled", False),
+            "active_testing_status": active.get("status", "completed" if active else "skipped"),
+            "findings_count": active.get("unique_findings", len(active.get("findings", []))),
+            "missing_tools": active.get("missing", 0),
             "out": a.out,
         }, indent=2))
 
