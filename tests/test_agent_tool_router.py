@@ -23,14 +23,14 @@ class AgentToolRouterTests(unittest.TestCase):
                 results, [safe], td,
                 scope={"assets": ["https://app.example.test"], "out_of_scope": []},
             )
-        self.assertEqual(len(execute.call_args_list), 1)
-        command = execute.call_args.args[0]
-        self.assertIn("dalfox", command)
-        target_file = Path(command[2])
-        self.assertEqual(target_file.read_text(encoding="utf-8").strip(), safe)
-        self.assertEqual(summary["runs"][0]["status"], "ok")
-        self.assertTrue(any(row["status"] == "rejected" for row in summary["decisions"]))
-        self.assertEqual(summary["findings"], [])
+            self.assertEqual(len(execute.call_args_list), 1)
+            command = execute.call_args.args[0]
+            self.assertIn("dalfox", command)
+            target_file = Path(command[2])
+            self.assertEqual(target_file.read_text(encoding="utf-8").strip(), safe)
+            self.assertEqual(summary["runs"][0]["status"], "ok")
+            self.assertTrue(any(row["status"] == "rejected" for row in summary["decisions"]))
+            self.assertEqual(summary["findings"], [])
 
     def test_dalfox_skips_urls_without_query_parameters(self):
         route = "https://app.example.test/profile"
