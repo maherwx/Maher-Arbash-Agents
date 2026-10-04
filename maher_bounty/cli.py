@@ -124,7 +124,7 @@ def main():
         print(json.dumps(write_status(_service_config(a)), indent=2))
         return
     if a.cmd == "run":
-        result = run(a.scope, a.rules, a.out, a.inventory)
+        result = run(a.scope, a.rules, a.out, a.inventory, authorized=a.authorized)
         print(f"Completed {result['agent_count']} agent passes. Reports: {a.out}")
         return
     if a.cmd == "auto-run":
