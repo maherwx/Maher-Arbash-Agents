@@ -11,6 +11,12 @@ from urllib.parse import urlparse
 from .scope_policy import filter_in_scope_urls, scope_target_urls
 from .tool_advisor import recommend_tools
 
+SAFE_CONTENT_PATHS = (
+    "robots.txt", "sitemap.xml", "security.txt", ".well-known/security.txt",
+    "openapi.json", "swagger.json", "api", "api-docs", "graphql",
+    "login", "register", "search", "admin", "health", "status",
+)
+
 
 def _tail(value, limit: int = 3000) -> str:
     if isinstance(value, bytes):
@@ -64,12 +70,10 @@ def _nuclei_findings(path: Path) -> list[dict]:
             continue
         info = row.get("info") or {}
         findings.append({
-            "source": "nuclei",
-            "title": info.get("name") or row.get("template-id") or "Nuclei finding",
+            "source": "nuclei", "title": info.get("name") or row.get("template-id") or "Nuclei finding",
             "severity": str(info.get("severity") or "info").lower(),
             "target": row.get("matched-at") or row.get("host") or row.get("url"),
-            "template_id": row.get("template-id"),
-            "matcher": row.get("matcher-name"),
+            "template_id": row.get("template-id"), "matcher": row.get("matcher-name"),
             "evidence": row.get("extracted-results") or row.get("matcher-status") or row.get("type"),
             "validated": True,
         })
@@ -82,9 +86,7 @@ def _nikto_findings(path: Path, target: str) -> list[dict]:
     findings = []
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         value = line.strip()
-        if not value.startswith("+"):
-            continue
-        if any(x in value.lower() for x in ("target ip", "target hostname", "target port", "start time", "end time", "server:")):
+        if not value.startswith("+") or any(x in value.lower() for x in ("target ip", "target hostname", "target port", "start time", "end time", "server:")):
             continue
         findings.append({"source": "nikto", "title": value.lstrip("+ ")[:180], "severity": "info", "target": target, "evidence": value, "validated": False})
     return findings
@@ -115,36 +117,79 @@ def _dedupe(findings: list[dict]) -> list[dict]:
     return list(merged.values())
 
 
+def _tool_coverage(inventory: dict, runs: list[dict]) -> list[dict]:
+    plan = recommend_tools(inventory, include_active=True)
+    statuses = {}
+    for row in runs:
+        statuses.setdefault(row.get("tool"), []).append(row.get("status"))
+    coverage = []
+    for recommendation in plan.get("tools", []):
+        item = dict(recommendation)
+        command = item.get("command")
+        if command and command in statuses:
+            item["execution_status"] = "executed"
+            item["run_statuses"] = statuses[command]
+        elif item.get("mode") in {"manual_proxy_report_import", "static"}:
+            item["execution_status"] = "requires_input"
+            item["reason"] = "manual traffic/report or source repository is required"
+        elif command and not shutil.which(command):
+            item["execution_status"] = "not_installed"
+        else:
+            item["execution_status"] = "not_scheduled"
+            item["reason"] = "not yet wired into the active web workflow"
+        coverage.append(item)
+    return coverage
+
+
+def _in_scope_unique(values, scope: dict, *, target: str | None = None) -> list[str]:
+    allowed, _ = filter_in_scope_urls(values, scope, target=target)
+    return allowed
+
+
+def _directory_discovery(scan_target: str, host_dir: Path, runs: list[dict]) -> None:
+    parsed = urlparse(scan_target)
+    if parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
+        runs.append({"tool": "ffuf/gobuster", "status": "skipped", "target": scan_target, "reason": "only origin URLs are eligible for content discovery"})
+        return
+    wordlist = host_dir / "safe-content-paths.txt"
+    wordlist.write_text("\n".join(SAFE_CONTENT_PATHS) + "\n", encoding="utf-8")
+    if shutil.which("ffuf"):
+        runs.append(_exec([
+            "ffuf", "-w", str(wordlist), "-u", scan_target.rstrip("/") + "/FUZZ",
+            "-rate", "3", "-t", "2", "-maxtime", "30", "-noninteractive",
+            "-of", "json", "-o", str(host_dir / "ffuf.json"),
+            "-mc", "200,204,301,302,307,401,403",
+        ], timeout=45))
+    elif shutil.which("gobuster"):
+        runs.append(_exec([
+            "gobuster", "dir", "-u", scan_target, "-w", str(wordlist),
+            "--threads", "2", "--delay", "300ms", "--timeout", "5s",
+            "--no-error", "--quiet", "-o", str(host_dir / "gobuster.txt"),
+        ], timeout=45))
+    else:
+        runs.append({"tool": "ffuf/gobuster", "status": "missing", "reason": "neither binary is installed"})
+
+
 def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path, *, scope: dict | None = None) -> dict:
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
     inventory = inventory if isinstance(inventory, dict) else {}
     scope = scope if isinstance(scope, dict) else {}
     endpoints = [row.get("value") for row in inventory.get("endpoints", []) if isinstance(row, dict) and row.get("value")]
-    assets = scope.get("assets") if isinstance(scope.get("assets"), list) else []
     active_targets, target_rejections = scope_target_urls(scope, inventory, target=target)
     target_url = [target] if target and "://" in target else []
-    candidates = [*active_targets, *target_url, *endpoints]
-    fallback_target = target if not assets else None
-    allowed_urls, rejected_urls = filter_in_scope_urls(candidates, scope, target=fallback_target)
+    fallback_target = target if not scope.get("assets") else None
+    allowed_urls, rejected_urls = filter_in_scope_urls([*active_targets, *target_url, *endpoints], scope, target=fallback_target)
     rejected_urls = list(dict.fromkeys([*rejected_urls, *target_rejections]))
-
     scope_review = {
-        "seed_target": target,
-        "authorized_targets": active_targets,
-        "authorized_url_count": len(allowed_urls),
-        "rejected_url_count": len(rejected_urls),
-        "allowed_urls": allowed_urls,
-        "rejected_urls": rejected_urls,
+        "seed_target": target, "authorized_targets": active_targets,
+        "authorized_url_count": len(allowed_urls), "rejected_url_count": len(rejected_urls),
+        "allowed_urls": allowed_urls, "rejected_urls": rejected_urls,
     }
     (root / "scope-review.json").write_text(json.dumps(scope_review, ensure_ascii=False, indent=2), encoding="utf-8")
+    runs, findings = [], []
+    discovered_urls = list(allowed_urls)
 
-    url_list = root / "targets.txt"
-    url_list.write_text("\n".join(allowed_urls) + ("\n" if allowed_urls else ""), encoding="utf-8")
-    runs = []
-    findings = []
-
-    # Run each active tool against every asset admitted by the program scope.
     for scan_target in active_targets:
         parsed = urlparse(scan_target)
         host = parsed.hostname or ""
@@ -154,44 +199,52 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
 
         katana_out = host_dir / "katana.txt"
         runs.append(_exec(["katana", "-u", scan_target, "-silent", "-d", "3", "-jc", "-fs", "fqdn"], timeout=90, output=katana_out))
+        if katana_out.exists():
+            crawled = [line.strip() for line in katana_out.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
+            discovered_urls.extend(_in_scope_unique(crawled, scope, target=fallback_target))
 
-        nuclei_out = host_dir / "nuclei.jsonl"
-        runs.append(_exec(["nuclei", "-u", scan_target, "-jsonl", "-severity", "info,low,medium,high,critical", "-o", str(nuclei_out)], timeout=180))
-        findings.extend(_nuclei_findings(nuclei_out))
-
+        _directory_discovery(scan_target, host_dir, runs)
         nikto_out = host_dir / "nikto.txt"
         runs.append(_exec(["nikto", "-h", scan_target, "-nointeractive"], timeout=120, output=nikto_out))
         findings.extend(_nikto_findings(nikto_out, scan_target))
+        runs.append(_exec(["nmap", "-sV", "-Pn", "--top-ports", "100", host], timeout=120, output=host_dir / "nmap.txt"))
+        runs.append(_exec(["tlsx", "-u", scan_target, "-silent", "-san", "-cn", "-so"], timeout=60, output=host_dir / "tlsx.txt"))
+        if shutil.which("zap-baseline.py"):
+            runs.append(_exec([
+                "zap-baseline.py", "-t", scan_target, "-m", "2", "-T", "30",
+                "-J", str(host_dir / "zap-baseline.json"), "-r", str(host_dir / "zap-baseline.html"),
+            ], timeout=180))
 
-        nmap_out = host_dir / "nmap.txt"
-        runs.append(_exec(["nmap", "-sV", "-Pn", "--top-ports", "100", host], timeout=120, output=nmap_out))
-        tlsx_out = host_dir / "tlsx.txt"
-        runs.append(_exec(["tlsx", "-u", scan_target, "-silent", "-san", "-cn", "-so"], timeout=60, output=tlsx_out))
-
-    if allowed_urls:
+    discovered_urls = _in_scope_unique(discovered_urls, scope, target=fallback_target)
+    target_file = root / "targets.txt"
+    target_file.write_text("\n".join(discovered_urls) + ("\n" if discovered_urls else ""), encoding="utf-8")
+    if discovered_urls:
+        nuclei_out = root / "nuclei.jsonl"
+        runs.append(_exec([
+            "nuclei", "-l", str(target_file), "-jsonl", "-severity", "info,low,medium,high,critical",
+            "-rate-limit", "5", "-concurrency", "5", "-timeout", "10", "-retries", "1",
+            "-o", str(nuclei_out),
+        ], timeout=240))
+        findings.extend(_nuclei_findings(nuclei_out))
         dalfox_out = root / "dalfox.txt"
-        runs.append(_exec(["dalfox", "file", str(url_list), "--silence"], timeout=120, output=dalfox_out))
-        findings.extend(_dalfox_findings(dalfox_out, target or (active_targets[0] if active_targets else "")))
+        runs.append(_exec(["dalfox", "file", str(target_file), "--silence"], timeout=180, output=dalfox_out))
+        findings.extend(_dalfox_findings(dalfox_out, target or discovered_urls[0]))
 
     unique = _dedupe(findings)
     adaptive_tool_plan = recommend_tools(inventory, include_active=True)
     summary = {
-        "seed_target": target,
-        "targets": active_targets,
-        "target_count": len(active_targets),
-        "registered": 5 * len(active_targets) + (1 if allowed_urls else 0),
-        "executed": sum(1 for run in runs if run.get("status") != "missing"),
-        "missing": sum(1 for run in runs if run.get("status") == "missing"),
-        "timeouts": sum(1 for run in runs if run.get("status") == "timeout"),
-        "failed": sum(1 for run in runs if run.get("status") == "nonzero"),
-        "raw_findings": len(findings),
-        "unique_findings": len(unique),
-        "scope_review": scope_review,
-        "adaptive_tool_plan": adaptive_tool_plan,
-        "runs": runs,
-        "findings": unique,
+        "seed_target": target, "targets": active_targets, "target_count": len(active_targets),
+        "discovered_in_scope_url_count": len(discovered_urls), "discovered_in_scope_urls": discovered_urls,
+        "rejected_url_count": len(rejected_urls), "registered": len(runs),
+        "executed": sum(1 for row in runs if row.get("status") not in {"missing", "skipped"}),
+        "missing": sum(1 for row in runs if row.get("status") == "missing"),
+        "timeouts": sum(1 for row in runs if row.get("status") == "timeout"),
+        "failed": sum(1 for row in runs if row.get("status") == "nonzero"),
+        "raw_findings": len(findings), "unique_findings": len(unique),
+        "scope_review": scope_review, "adaptive_tool_plan": adaptive_tool_plan,
+        "tool_coverage": _tool_coverage(inventory, runs), "runs": runs, "findings": unique,
     }
     (root / "active-testing.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     (root / "findings.json").write_text(json.dumps(unique, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[EVIDENCE] targets={len(active_targets)} raw={len(findings)} unique={len(unique)}", flush=True)
+    print(f"[EVIDENCE] targets={len(active_targets)} urls={len(discovered_urls)} raw={len(findings)} unique={len(unique)}", flush=True)
     return summary
