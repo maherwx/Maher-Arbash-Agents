@@ -3,11 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "scripts": {"analyze": "tsx src/index.ts"},
+  "scripts": {
+    "analyze": "tsx src/index.ts",
+    "check": "tsc --noEmit"
+  },
   "dependencies": {
     "@babel/parser": "^7.26.0",
     "@babel/traverse": "^7.25.9",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
   }
 }
