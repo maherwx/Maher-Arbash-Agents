@@ -7,6 +7,7 @@ from .orchestrator import run
 from .result_store import build_inventory
 from .traffic_ingest import ingest_traffic
 from .traffic_pipeline import analyze_traffic
+from .continuous_service import ContinuousAnalysisService, ServiceConfig, write_status
 
 
 def doctor():
@@ -19,6 +20,19 @@ def doctor():
     rows = [{"tool": t, "path": shutil.which(t), "available": bool(shutil.which(t))} for t in tools]
     print(json.dumps({"tools": rows, "available": sum(r["available"] for r in rows), "total": len(rows)}, indent=2))
     return 0 if shutil.which("python3") else 1
+
+
+def _service_config(args):
+    return ServiceConfig(
+        watch_dir=args.watch,
+        output_dir=args.out,
+        db_path=args.service_db,
+        research_db_path=args.research_db,
+        poll_seconds=args.poll,
+        worker_count=args.workers,
+        retry_limit=args.retries,
+        retry_backoff_seconds=args.backoff,
+    )
 
 
 def main():
@@ -44,6 +58,26 @@ def main():
     ta.add_argument("--kind", choices=["auto", "burp", "har", "zap"], default="auto")
     ta.add_argument("--out", default="results/traffic-analysis")
     ta.add_argument("--db", default=".maher/research.db")
+
+    svc = s.add_parser("serve", help="Run continuous incremental analysis service")
+    svc.add_argument("--watch", default="incoming")
+    svc.add_argument("--out", default="results/continuous")
+    svc.add_argument("--service-db", default=".maher/service.db")
+    svc.add_argument("--research-db", default=".maher/research.db")
+    svc.add_argument("--poll", type=float, default=2.0)
+    svc.add_argument("--workers", type=int, default=2)
+    svc.add_argument("--retries", type=int, default=3)
+    svc.add_argument("--backoff", type=float, default=5.0)
+
+    status = s.add_parser("service-status", help="Show continuous service job state")
+    status.add_argument("--watch", default="incoming")
+    status.add_argument("--out", default="results/continuous")
+    status.add_argument("--service-db", default=".maher/service.db")
+    status.add_argument("--research-db", default=".maher/research.db")
+    status.add_argument("--poll", type=float, default=2.0)
+    status.add_argument("--workers", type=int, default=2)
+    status.add_argument("--retries", type=int, default=3)
+    status.add_argument("--backoff", type=float, default=5.0)
 
     s.add_parser("doctor", help="Check local runtimes and research tools")
     a = p.parse_args()
@@ -71,6 +105,17 @@ def main():
             "anomalies": result["anomalies"]["anomaly_count"],
             "out": a.out,
         }, indent=2))
+        return
+    if a.cmd == "serve":
+        service = ContinuousAnalysisService(_service_config(a))
+        try:
+            print(json.dumps({"status": "starting", **service.status()}, indent=2))
+            service.run_forever()
+        finally:
+            service.close()
+        return
+    if a.cmd == "service-status":
+        print(json.dumps(write_status(_service_config(a)), indent=2))
         return
     if a.cmd == "run":
         result = run(a.scope, a.rules, a.out, a.inventory)
