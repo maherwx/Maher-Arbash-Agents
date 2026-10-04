@@ -50,20 +50,42 @@ def from_jsts_ast(result: dict) -> dict:
 
 
 def from_structural_ir(result: dict) -> dict:
-    """Accept analyzers that already emit the canonical IR function shape (JVM/.NET and future adapters)."""
     return {"language":result.get("language","unknown"),"functions":list(result.get("functions",[]))}
 
 
-def merge_ir(*documents: dict) -> dict:
+def merge_ir(*documents: dict, semantic_model: dict | None = None) -> dict:
     functions=[]
-    for doc in documents: functions.extend(doc.get("functions", []))
+    for doc in documents:
+        functions.extend(doc.get("functions", []))
     by_name={}
-    for fn in functions: by_name.setdefault(fn.get("name"), []).append(fn)
-    call_edges=[]; unresolved=[]
+    for fn in functions:
+        by_name.setdefault(fn.get("name"), []).append(fn)
+
+    semantic_lookup={}
+    for item in (semantic_model or {}).get("call_resolutions", []):
+        if item.get("resolved"):
+            semantic_lookup[(item.get("caller"), item.get("symbol"))]=item
+
+    call_edges=[]; unresolved=[]; seen=set()
     for fn in functions:
         for callee in fn.get("calls", []):
+            semantic=semantic_lookup.get((fn.get("id"), callee))
+            if semantic:
+                target=semantic.get("resolved")
+                candidates=semantic.get("candidates") or []
+                confidence=float(candidates[0].get("confidence") or 0.5) if candidates else 0.5
+                key=(fn["id"],target,callee)
+                if key not in seen:
+                    seen.add(key)
+                    call_edges.append({"from":fn["id"],"to":target,"kind":"calls","symbol":callee,"confidence":confidence,"resolution":"semantic"})
+                continue
             short=callee.split(".")[-1]; candidates=by_name.get(short, [])
-            if len(candidates)==1: call_edges.append({"from":fn["id"],"to":candidates[0]["id"],"kind":"calls","symbol":callee})
-            else: unresolved.append({"from":fn["id"],"symbol":callee,"candidate_count":len(candidates)})
+            if len(candidates)==1:
+                target=candidates[0]["id"]; key=(fn["id"],target,callee)
+                if key not in seen:
+                    seen.add(key)
+                    call_edges.append({"from":fn["id"],"to":target,"kind":"calls","symbol":callee,"confidence":0.75,"resolution":"unique-name"})
+            else:
+                unresolved.append({"from":fn["id"],"symbol":callee,"candidate_count":len(candidates)})
     route_functions=[fn for fn in functions if fn.get("route_bindings")]
-    return {"schema_version":"1.1","function_count":len(functions),"languages":sorted({fn.get("language") for fn in functions}),"functions":functions,"call_edges":call_edges,"unresolved_calls":unresolved,"route_function_count":len(route_functions),"route_functions":route_functions}
+    return {"schema_version":"1.2","function_count":len(functions),"languages":sorted({fn.get("language") for fn in functions}),"functions":functions,"call_edges":call_edges,"unresolved_calls":unresolved,"route_function_count":len(route_functions),"route_functions":route_functions,"semantic_resolution_used":bool(semantic_model)}
