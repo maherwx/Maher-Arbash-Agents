@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import os
+import tempfile
 import yaml
 from .model_adapter import LocalModelAdapter
 from .hypothesis_engine import build_hypotheses
@@ -10,6 +11,7 @@ from .reporting import build_report_bundle
 from .knowledge_graph import build_application_graph
 from .persistence import ResearchStore
 from .native_engines import run_native_engines
+from .tool_orchestration import collect_target_inventory
 
 
 def load_agents():
@@ -41,20 +43,27 @@ def load_inventory(scope, explicit_path=None):
 
 
 def compact_inventory(inventory, max_items=250):
-    return {"counts": inventory.get("counts", {}), "hosts": inventory.get("hosts", [])[:max_items], "endpoints": inventory.get("endpoints", [])[:max_items], "http": inventory.get("http", [])[:max_items], "source_file": inventory.get("source_file")}
+    return {"counts": inventory.get("counts", {}), "hosts": inventory.get("hosts", [])[:max_items], "endpoints": inventory.get("endpoints", [])[:max_items], "http": inventory.get("http", [])[:max_items], "source_file": inventory.get("source_file"), "target": inventory.get("target"), "tool_plan": inventory.get("tool_plan", {})}
 
 
-def run(scope_path, rules_path, out_dir="reports", inventory_path=None):
-    scope = yaml.safe_load(Path(scope_path).read_text(encoding="utf-8"))
-    rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8"))
+def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None):
     if not rules.get("authorization_required", True):
         raise SystemExit("rules.yaml must keep authorization_required=true")
+    if target:
+        scope = dict(scope or {})
+        scope.setdefault("program", "Authorized target assessment")
+        scope["assets"] = [target]
 
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     store = ResearchStore()
     run_id = store.create_run(scope)
     try:
         inventory = load_inventory(scope, inventory_path)
+        if target and not inventory_path:
+            recon_dir = out / "recon"
+            inventory = collect_target_inventory(target, recon_dir, rules=rules)
+            inventory["source_file"] = str(recon_dir / "inventory.json")
+
         context_inventory = compact_inventory(inventory)
         hypotheses = build_hypotheses(context_inventory)
         topology = architecture_map(context_inventory)
@@ -95,6 +104,7 @@ def run(scope_path, rules_path, out_dir="reports", inventory_path=None):
         payload = {
             "run_id": run_id, "scope": scope, "rules": rules,
             "inventory_counts": inventory.get("counts", {}), "inventory_source": source_file,
+            "tool_plan": inventory.get("tool_plan", {}),
             "hypothesis_count": len(hypotheses), "hypotheses": hypotheses,
             "application_graph_stats": graph.get("stats", {}), "native_engines": native,
             "collaboration_waves": wave_summary, "agent_count": len(results), "results": results,
@@ -106,3 +116,28 @@ def run(scope_path, rules_path, out_dir="reports", inventory_path=None):
     except Exception:
         store.finish(run_id, "failed")
         raise
+
+
+def run(scope_path, rules_path, out_dir="reports", inventory_path=None):
+    scope = yaml.safe_load(Path(scope_path).read_text(encoding="utf-8"))
+    rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8"))
+    return _run_loaded(scope, rules, out_dir, inventory_path)
+
+
+def run_target(target: str, rules_path: str | None=None, out_dir="results/auto", *, authorized=False):
+    if not authorized:
+        raise SystemExit("auto-run requires --authorized to confirm permission for the supplied target")
+    if rules_path:
+        rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8"))
+    else:
+        rules = {
+            "authorization_required": True,
+            "respect_out_of_scope": True,
+            "no_destructive_testing": True,
+            "no_denial_of_service": True,
+            "no_persistence": True,
+            "report_evidence": True,
+            "allow_active_discovery": False,
+        }
+    scope={"program":"Authorized target assessment","assets":[target],"out_of_scope":[]}
+    return _run_loaded(scope, rules, out_dir, target=target)
