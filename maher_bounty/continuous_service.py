@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import signal
 import sqlite3
 import threading
@@ -9,7 +8,6 @@ import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from queue import Queue, Empty
-from typing import Callable
 
 from .traffic_pipeline import analyze_traffic
 
@@ -43,6 +41,7 @@ class ServiceConfig:
     worker_count: int = 2
     retry_limit: int = 3
     retry_backoff_seconds: float = 5.0
+    stale_running_seconds: float = 30.0
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -62,14 +61,45 @@ class ContinuousAnalysisService:
         self.db.commit()
         self.lock = threading.RLock()
         self.queue: Queue[int] = Queue()
+        self.enqueued: set[int] = set()
         self.stop_event = threading.Event()
         self.workers: list[threading.Thread] = []
+        self.recover_incomplete_jobs()
 
     def _execute(self, sql: str, params=()):
         with self.lock:
             cur = self.db.execute(sql, params)
             self.db.commit()
             return cur
+
+    def _enqueue(self, job_id: int) -> bool:
+        with self.lock:
+            if job_id in self.enqueued:
+                return False
+            self.enqueued.add(job_id)
+            self.queue.put(job_id)
+            return True
+
+    def recover_incomplete_jobs(self) -> int:
+        now = time.time()
+        cutoff = now - max(0.0, self.config.stale_running_seconds)
+        recovered = 0
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT id,status,updated_at FROM service_jobs WHERE status IN ('queued','running')"
+            ).fetchall()
+            for job_id, status, updated_at in rows:
+                if status == "running" and float(updated_at or 0) > cutoff:
+                    continue
+                if status == "running":
+                    self.db.execute(
+                        "UPDATE service_jobs SET status='queued',updated_at=?,last_error=? WHERE id=?",
+                        (now, "recovered after interrupted service execution", job_id),
+                    )
+                if self._enqueue(int(job_id)):
+                    recovered += 1
+            self.db.commit()
+        return recovered
 
     def _discover_kind(self, path: Path) -> str | None:
         suffix = path.suffix.lower()
@@ -89,7 +119,10 @@ class ContinuousAnalysisService:
                 continue
             now = time.time()
             with self.lock:
-                row = self.db.execute("SELECT id,status FROM service_jobs WHERE path=? AND kind=?", (str(path), kind)).fetchone()
+                row = self.db.execute(
+                    "SELECT id,status FROM service_jobs WHERE path=? AND kind=?",
+                    (str(path), kind),
+                ).fetchone()
                 if row is None:
                     cur = self.db.execute(
                         "INSERT INTO service_jobs(path,kind,status,attempts,first_seen,updated_at) VALUES(?,?,?,?,?,?)",
@@ -97,11 +130,11 @@ class ContinuousAnalysisService:
                     )
                     job_id = int(cur.lastrowid)
                     self.db.commit()
-                    self.queue.put(job_id)
-                    queued += 1
+                    if self._enqueue(job_id):
+                        queued += 1
                 elif row[1] in {"failed", "queued"}:
-                    self.queue.put(int(row[0]))
-                    queued += 1
+                    if self._enqueue(int(row[0])):
+                        queued += 1
         return queued
 
     def _job(self, job_id: int) -> dict | None:
@@ -138,7 +171,10 @@ class ContinuousAnalysisService:
                 "anomaly_count": result.get("anomalies", {}).get("anomaly_count", 0),
                 "protocol_signal_count": result.get("protocols", {}).get("signal_count", 0),
                 "workflow_divergence_count": result.get("workflow_divergences", {}).get("divergence_count", 0),
+                "provenance_chain_count": result.get("provenance", {}).get("chain_count", 0),
+                "priority_target_count": result.get("priorities", {}).get("target_count", 0),
             }
+            target_out.mkdir(parents=True, exist_ok=True)
             (target_out / "service-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
             self._execute(
                 "UPDATE service_jobs SET status=?,updated_at=?,last_error=NULL WHERE id=?",
@@ -151,7 +187,7 @@ class ContinuousAnalysisService:
                 (state, time.time(), repr(exc)[:2000], job_id),
             )
             if state == "queued" and not self.stop_event.wait(self.config.retry_backoff_seconds * attempts):
-                self.queue.put(job_id)
+                self._enqueue(job_id)
 
     def _worker(self) -> None:
         while not self.stop_event.is_set():
@@ -159,6 +195,8 @@ class ContinuousAnalysisService:
                 job_id = self.queue.get(timeout=0.5)
             except Empty:
                 continue
+            with self.lock:
+                self.enqueued.discard(job_id)
             try:
                 job = self._job(job_id)
                 if job and job["status"] in {"queued", "failed"}:
@@ -170,6 +208,7 @@ class ContinuousAnalysisService:
         with self.lock:
             rows = self.db.execute("SELECT status,COUNT(*) FROM service_jobs GROUP BY status").fetchall()
             total = self.db.execute("SELECT COUNT(*) FROM service_jobs").fetchone()[0]
+            heartbeat = self.db.execute("SELECT value FROM service_state WHERE key='heartbeat'").fetchone()
         return {
             "running": not self.stop_event.is_set(),
             "watch_dir": str(self.watch_dir),
@@ -178,10 +217,12 @@ class ContinuousAnalysisService:
             "jobs_total": total,
             "jobs_by_status": {status: count for status, count in rows},
             "queue_depth": self.queue.qsize(),
+            "heartbeat": float(heartbeat[0]) if heartbeat else None,
         }
 
     def run_forever(self) -> None:
         self.stop_event.clear()
+        self.recover_incomplete_jobs()
         for idx in range(max(1, self.config.worker_count)):
             t = threading.Thread(target=self._worker, name=f"maher-worker-{idx+1}", daemon=True)
             t.start()
