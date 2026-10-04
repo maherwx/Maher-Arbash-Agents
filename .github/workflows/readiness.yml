@@ -44,7 +44,7 @@ jobs:
           cache-dependency-path: analyzers/js-ts/package.json
       - run: cd analyzers/js-ts && npm install
       - run: cd analyzers/js-ts && npm run check
-      - run: cd analyzers/js-ts && npm run analyze -- fixtures > /tmp/js-analysis.json
+      - run: cd analyzers/js-ts && npm run --silent analyze -- fixtures > /tmp/js-analysis.json
       - run: node -e "const x=require('/tmp/js-analysis.json'); if(x.function_count<2) process.exit(1); if(!x.route_handlers.some(r=>r.path==='/users/:id')) process.exit(2); if(!x.call_edges.some(e=>e.callee==='loadUser')) process.exit(3);"
 
   ecosystem-runtime-smoke:
