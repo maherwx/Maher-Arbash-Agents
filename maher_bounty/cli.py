@@ -130,9 +130,14 @@ def main():
         status = active.get("status", "completed" if active else "skipped")
         findings = active.get("unique_findings", len(active.get("findings", [])))
         validation = result.get("validated_evidence", {}).get("counts", {})
+        execution = result.get("agent_execution", {})
         print(
-            f"Completed {result['agent_count']} agent passes; active_testing={status}; "
-            f"candidate_findings={findings}; evidence_backed={validation.get('evidence_backed', 0)}; "
+            f"Agent roles={execution.get('configured_roles', result.get('agent_count', 0))}; "
+            f"model_mode={execution.get('mode', 'unknown')}; "
+            f"model_analyzed={execution.get('successful_model_analyses', 0)}; "
+            f"planning_only={execution.get('planning_only', 0)}; "
+            f"active_testing={status}; candidate_findings={findings}; "
+            f"evidence_backed={validation.get('evidence_backed', 0)}; "
             f"needs_review={validation.get('needs_review', 0)}. Reports: {a.out}"
         )
         return
@@ -143,7 +148,8 @@ def main():
         print(json.dumps({
             "target": a.target,
             "inventory_counts": result.get("inventory_counts", {}),
-            "agent_count": result.get("agent_count", 0),
+            "agent_roles_configured": result.get("agent_execution", {}).get("configured_roles", result.get("agent_count", 0)),
+            "agent_execution": result.get("agent_execution", {}),
             "active_discovery_enabled": result.get("tool_plan", {}).get("active_discovery_enabled", False),
             "active_testing_status": active.get("status", "completed" if active else "skipped"),
             "candidate_findings_count": active.get("unique_findings", len(active.get("findings", []))),
