@@ -22,12 +22,10 @@ class ActiveCoverageTests(unittest.TestCase):
     def test_content_discovery_skips_target_with_path_or_query(self):
         runs = []
         with tempfile.TemporaryDirectory() as td:
-            _directory_discovery(
-                "https://example.test/shop?item=1", Path(td), runs
-            )
+            _directory_discovery("https://example.test/shop?item=1", Path(td), runs)
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["status"], "skipped")
-        self.assertIn("path or query", runs[0]["reason"])
+        self.assertIn("origin URLs", runs[0]["reason"])
 
     @patch("maher_bounty.active_testing._exec")
     @patch("maher_bounty.active_testing.shutil.which", side_effect=lambda name: "/usr/bin/ffuf" if name == "ffuf" else None)
