@@ -87,10 +87,18 @@ def run_workflow_benchmark(out_dir, *, engine="http"):
             if size > 1024:
                 self.reply(413, '{}')
                 return
-            self.rfile.read(size)
+            raw = self.rfile.read(size).decode("utf-8", errors="replace")
             allowed = self.actor() == "owner" or fixture["case"] == "unprotected_state"
             if allowed:
-                fixture["state"] = "tampered"
+                try:
+                    supplied = json.loads(raw)
+                except ValueError:
+                    supplied = raw
+                state = supplied.get("state") if isinstance(supplied, dict) else supplied
+                if not isinstance(state, str) or state not in {"private", "tampered"}:
+                    self.reply(400, '{}')
+                    return
+                fixture["state"] = state
             self.reply(200 if allowed else 403, '{}')
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -124,6 +132,14 @@ def run_workflow_benchmark(out_dir, *, engine="http"):
                     final_proof = {"json_equals": {"/state": "private"}}
                 config["workflows"] = [{"id": name, "identity": "owner", "steps": [first, edit,
                     {"request": {"url": origin + "/objects/{{id}}"}, "expect": {"statuses": [200], **final_proof}}]}]
+                if engine == "browser":
+                    restore = {"request": {"url": origin + "/edit/{{id}}", "browser": {
+                        "actions": [{"kind": "fill", "selector": "#value", "value": "private"}, {"kind": "click", "selector": "#submit"}],
+                        "wait_for": "#done", "wait_for_network_idle": True}}, "expect": {"contains": ["submitted"]}}
+                else:
+                    restore = {"request": {"url": origin + "/objects/{{id}}", "method": "PATCH", "body": {"state": "private"}}, "expect": {"statuses": [200]}}
+                config["workflows"][0]["cleanup_steps"] = [restore,
+                    {"request": {"url": origin + "/objects/{{id}}"}, "expect": {"statuses": [200], **final_proof}}]
             else:
                 config["access_cases"] = [{"id": name, "allowed": ["owner"], "denied": ["other", "anonymous"],
                     "request": {"url": origin + "/objects/42"}, "proof": proof}]
@@ -134,6 +150,10 @@ def run_workflow_benchmark(out_dir, *, engine="http"):
                                 "passed": observed == expected, "requests": evidence["requests"],
                                 "confirmed_findings": sum(bool(f.get("validated")) for f in evidence["findings"]),
                                 "candidate_findings": sum(not f.get("validated") for f in evidence["findings"])})
+                if name.endswith("state"):
+                    verified = fixture["state"] == "private" and all(row["status"] == "completed" for row in evidence.get("cleanup_decisions", [])) and bool(evidence.get("cleanup_decisions"))
+                    results[-1]["cleanup_verified"] = verified
+                    results[-1]["passed"] = results[-1]["passed"] and verified
             except Exception as error:
                 results.append({"case": name, "expected": expected, "observed": "execution_error",
                                 "passed": False, "error_type": type(error).__name__})
