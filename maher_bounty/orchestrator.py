@@ -19,6 +19,7 @@ from .scope_policy import scope_seed_targets
 from .traffic_ingest import ingest_traffic
 from .burp_evidence import build_scoped_traffic_evidence, build_traffic_target_references
 from .advanced_analysis import build_application_intelligence, normalize_evidence, validate_evidence, build_agent_workstreams, write_advanced_artifacts
+from .advanced_web_tools import run_advanced_web_tools
 
 
 def load_agents():
@@ -127,11 +128,20 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         traffic_evidence = {
             "source": "burp_or_har_import", "records": [], "record_count": 0,
             "out_of_scope_records_filtered": 0, "truncated": False,
+            "advanced_analysis": {},
         }
         if traffic_path:
             imported_traffic = ingest_traffic(traffic_path, kind="auto")
             traffic_evidence = build_scoped_traffic_evidence(imported_traffic, scope)
             traffic_target_refs = build_traffic_target_references(imported_traffic, scope)
+            allowed_traffic_urls = set(traffic_target_refs.values())
+            scoped_traffic = [row for row in imported_traffic if row.get("url") in allowed_traffic_urls]
+            advanced_analysis = run_advanced_web_tools(scoped_traffic)
+            traffic_evidence["advanced_analysis"] = advanced_analysis
+            (out / "advanced-traffic-tools.json").write_text(
+                json.dumps(advanced_analysis, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            store.checkpoint(run_id, "advanced_web_tools", advanced_analysis)
             (out / "burp-traffic-evidence.json").write_text(
                 json.dumps(traffic_evidence, ensure_ascii=False, indent=2), encoding="utf-8"
             )
