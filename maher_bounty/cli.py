@@ -10,6 +10,7 @@ from .traffic_ingest import ingest_traffic, TrafficInputError
 from .traffic_pipeline import analyze_traffic
 from .workflow_execution import execute_workflows
 from .continuous_service import ContinuousAnalysisService, ServiceConfig, write_status
+from .source_review import review_source
 
 
 def doctor():
@@ -57,6 +58,7 @@ def _main():
     r.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
     r.add_argument("--authorized", action="store_true", help="Confirm permission for active checks against the supplied scope")
     r.add_argument("--workflow-manifest", default=None, help="JSON manifest of test identities, access policies and workflow invariants")
+    r.add_argument("--source-dir", default=None, help="Local application source directory for static Python review")
 
     auto = s.add_parser("auto-run", help="Collect target inventory and run the full collaborative pipeline")
     auto.add_argument("--target", required=True, help="Authorized website/domain target")
@@ -65,6 +67,11 @@ def _main():
     auto.add_argument("--out", default="results/auto")
     auto.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
     auto.add_argument("--workflow-manifest", default=None, help="Execute authenticated access policies and workflow invariants")
+    auto.add_argument("--source-dir", default=None, help="Local application source directory for static Python review")
+
+    source = s.add_parser("source-review", help="Review supplied local Python source without executing it or making network requests")
+    source.add_argument("--source-dir", required=True)
+    source.add_argument("--out", default="results/source-review")
 
     wf = s.add_parser("workflow-run", help="Execute application-specific access policies and workflow invariants")
     wf.add_argument("manifest", help="JSON assessment manifest")
@@ -166,6 +173,7 @@ def _main():
             a.scope, a.rules, a.out, a.inventory, authorized=a.authorized,
             **({"traffic_path": a.traffic} if a.traffic else {}),
             **({"workflow_manifest_path": a.workflow_manifest} if a.workflow_manifest else {}),
+            **({"source_dir": a.source_dir} if a.source_dir else {}),
         )
         active = result.get("active_testing", {})
         status = active.get("status", "completed" if active else "skipped")
@@ -188,6 +196,7 @@ def _main():
             a.target, a.rules, a.out, authorized=a.authorized,
             **({"traffic_path": a.traffic} if a.traffic else {}),
             **({"workflow_manifest_path": a.workflow_manifest} if a.workflow_manifest else {}),
+            **({"source_dir": a.source_dir} if a.source_dir else {}),
         )
         active = result.get("active_testing", {})
         validation = result.get("validated_evidence", {}).get("counts", {})
@@ -204,6 +213,12 @@ def _main():
             "missing_tools": active.get("missing", 0),
             "out": a.out,
         }, indent=2))
+
+
+    if a.cmd == "source-review":
+        report = review_source(a.source_dir, a.out)
+        print(json.dumps({key: report[key] for key in ("mode", "status", "file_count", "candidate_count", "truncated", "runtime_verified")}, indent=2))
+        return
 
 
 if __name__ == "__main__":
