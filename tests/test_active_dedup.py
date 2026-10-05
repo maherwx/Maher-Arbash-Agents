@@ -36,9 +36,9 @@ class ActiveScanDeduplicationTests(unittest.TestCase):
         self.assertEqual(counts["nmap"], 1)
         self.assertEqual(counts["tlsx"], 1)
         tls_cmd = next(command for command in executed if command[0] == "tlsx")
-        self.assertIn("-san", tls_cmd)
-        self.assertIn("-cn", tls_cmd)
-        self.assertNotIn("-so", tls_cmd)
+        self.assertIn("-json", tls_cmd)
+        self.assertNotIn("-san", tls_cmd)
+        self.assertNotIn("-cn", tls_cmd)
         skipped = [row for row in result["runs"] if row.get("status") == "skipped"]
         self.assertTrue(any(row.get("reason") == "already executed for this origin in the current run" for row in skipped))
 
