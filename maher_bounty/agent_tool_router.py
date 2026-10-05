@@ -11,11 +11,26 @@ from .scope_policy import filter_in_scope_urls
 
 # Agents choose from fixed local tools. Requests never contain shell commands,
 # executable paths, arbitrary flags, payloads, or new target hosts.
-SUPPORTED_AGENT_TOOLS = {"hakrawler", "nuclei", "dalfox", "zap-baseline.py"}
+SUPPORTED_AGENT_TOOLS = {
+    "hakrawler", "katana", "httpx", "nuclei", "dalfox", "zap-baseline.py",
+    "nikto", "nmap", "tlsx", "whatweb", "wafw00f",
+}
 MAX_AGENT_REQUESTS = 8
 MAX_AGENT_TARGETS = 30
 MAX_HAKRAWLER_ORIGINS = 2
 MAX_ZAP_ORIGINS = 2
+MAX_FOLLOWUP_ORIGINS = 2
+
+ORIGIN_TOOLS = {"hakrawler", "katana", "nikto", "zap-baseline.py", "whatweb", "wafw00f", "tlsx"}
+HOST_TOOLS = {"nmap"}
+
+
+def _coverage_key(tool: str, url: str) -> str:
+    if tool in HOST_TOOLS:
+        return (urlparse(url).hostname or "").lower()
+    if tool in ORIGIN_TOOLS:
+        return _origin(url)
+    return url
 
 
 def _request_rows(results: list[dict]) -> list[dict]:
@@ -47,32 +62,54 @@ def _read_target_file(command: list[str], flag: str) -> set[str]:
         return set()
 
 
-def _prior_coverage(active_testing: dict, known: set[str]) -> dict[str, set[str]]:
-    covered = {"nuclei": set(), "dalfox": set(), "zap-baseline.py": set()}
-    for run in active_testing.get("runs", []):
+def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | None = None) -> dict[str, set[str]]:
+    covered = {tool: set() for tool in SUPPORTED_AGENT_TOOLS}
+    run_rows = [
+        *(active_testing.get("runs", []) if isinstance(active_testing, dict) else []),
+        *((tool_plan or {}).get("runs", []) if isinstance(tool_plan, dict) else []),
+    ]
+    for run in run_rows:
         if not isinstance(run, dict) or run.get("status") in {"missing", "skipped"}:
             continue
-        tool = run.get("tool")
+        tool = str(run.get("tool") or "").strip().lower()
+        if tool not in covered:
+            continue
         command = run.get("command", [])
         if not isinstance(command, list):
             command = []
+        targets = set()
         if tool == "nuclei":
-            covered["nuclei"].update(_read_target_file(command, "-l") & known)
+            targets.update(_read_target_file(command, "-l"))
         elif tool == "dalfox":
             if len(command) >= 3 and command[1] == "file":
                 try:
-                    covered["dalfox"].update(
-                        set(Path(command[2]).read_text(encoding="utf-8", errors="ignore").splitlines()) & known
-                    )
+                    targets.update(Path(command[2]).read_text(encoding="utf-8", errors="ignore").splitlines())
                 except OSError:
                     pass
-        elif tool == "zap-baseline.py":
-            try:
-                covered["zap-baseline.py"].add(_origin(command[command.index("-t") + 1]))
-            except (ValueError, IndexError):
-                pass
+        elif tool == "nmap":
+            host = run.get("target")
+            if not host and command:
+                host = command[-1]
+            if host:
+                covered[tool].add(str(host).lower())
+            continue
+        else:
+            target = run.get("target") or run.get("url")
+            if not target:
+                for flag in ("-u", "-h", "-t"):
+                    try:
+                        target = command[command.index(flag) + 1]
+                        break
+                    except (ValueError, IndexError):
+                        pass
+            if not target and tool in {"whatweb", "wafw00f"} and command:
+                target = command[-1]
+            if target:
+                targets.add(str(target))
+        for target in targets:
+            if target in known or _origin(target):
+                covered[tool].add(_coverage_key(tool, target))
     return covered
-
 
 def run_agent_tool_requests(
     agent_results: list[dict],
@@ -81,6 +118,7 @@ def run_agent_tool_requests(
     *,
     scope: dict,
     active_testing: dict | None = None,
+    tool_plan: dict | None = None,
 ) -> dict:
     """Run bounded, allowlisted shell-backed tool follow-ups on scoped URLs.
 
@@ -91,9 +129,9 @@ def run_agent_tool_requests(
     root.mkdir(parents=True, exist_ok=True)
     allowed, rejected = filter_in_scope_urls(known_urls, scope)
     known = set(allowed)
-    covered = _prior_coverage(active_testing or {}, known)
+    covered = _prior_coverage(active_testing or {}, known, tool_plan)
     requests = _request_rows(agent_results)
-    selected = {"hakrawler": [], "nuclei": [], "dalfox": [], "zap-baseline.py": []}
+    selected = {tool: [] for tool in SUPPORTED_AGENT_TOOLS}
     decisions = []
     seen = {name: set() for name in selected}
     target_budget = MAX_AGENT_TARGETS
@@ -117,13 +155,13 @@ def run_agent_tool_requests(
             parsed = urlparse(url)
             if tool == "dalfox" and not parsed.query:
                 continue
-            if tool in {"nuclei", "dalfox"} and url in covered[tool]:
+            if tool == "tlsx" and parsed.scheme.lower() != "https":
+                continue
+            coverage_key = _coverage_key(tool, url)
+            if coverage_key and coverage_key in covered[tool]:
                 decisions.append({"agent": row.get("agent"), "tool": tool, "target": url, "status": "skipped", "reason": "already_covered_in_base_scan"})
                 continue
-            if tool == "zap-baseline.py" and _origin(url) in covered[tool]:
-                decisions.append({"agent": row.get("agent"), "tool": tool, "target": url, "status": "skipped", "reason": "origin_already_covered_in_base_scan"})
-                continue
-            dedupe_key = _origin(url) if tool in {"hakrawler", "zap-baseline.py"} else url
+            dedupe_key = coverage_key or url
             if dedupe_key not in seen[tool] and target_budget > 0:
                 seen[tool].add(dedupe_key)
                 eligible.append(url)
@@ -149,6 +187,49 @@ def run_agent_tool_requests(
 
     runs, findings = [], []
     new_crawl_urls = []
+
+    # Agents can request deeper, complementary passes from the installed local
+    # web toolkit. Each command is selected from fixed argv templates.
+    for tool in ("httpx", "katana", "whatweb", "wafw00f", "nikto", "nmap", "tlsx"):
+        targets = []
+        seen_keys = set()
+        for url in selected[tool]:
+            key = _coverage_key(tool, url)
+            if key and key not in seen_keys and key not in covered[tool]:
+                seen_keys.add(key)
+                targets.append(url)
+        if not targets:
+            continue
+        if tool == "httpx":
+            if not shutil.which(tool):
+                runs.append({"tool": tool, "status": "missing", "reason": "agent-requested HTTP probe; binary not installed"})
+                continue
+            target_file = root / "httpx-followup-targets.txt"
+            target_file.write_text("\\n".join(targets) + "\\n", encoding="utf-8")
+            result = _exec([tool, "-l", str(target_file), "-json", "-silent", "-rate-limit", "3"], timeout=180)
+            result["target_count"] = len(targets)
+            runs.append(result)
+            continue
+        for index, scan_url in enumerate(targets[:MAX_FOLLOWUP_ORIGINS], start=1):
+            if not shutil.which(tool):
+                runs.append({"tool": tool, "status": "missing", "target": scan_url, "reason": "agent-requested tool; binary not installed"})
+                continue
+            if tool == "katana":
+                command = [tool, "-u", scan_url, "-silent", "-d", "3", "-jc", "-fs", "fqdn"]
+            elif tool == "whatweb":
+                command = [tool, "-a", "1", "--no-errors", scan_url]
+            elif tool == "wafw00f":
+                command = [tool, scan_url]
+            elif tool == "nikto":
+                command = [tool, "-h", scan_url, "-nointeractive"]
+            elif tool == "nmap":
+                hostname = (urlparse(scan_url).hostname or "").lower()
+                command = [tool, "-sV", "-Pn", "--top-ports", "100", hostname]
+            else:  # TLSX; URL scope and HTTPS scheme are checked above.
+                command = [tool, "-u", scan_url, "-silent", "-san", "-cn"]
+            result = _exec(command, timeout=300)
+            result["target"] = scan_url
+            runs.append(result)
     hakrawler_urls = []
     seen_hakrawler_origins = set()
     for url in selected["hakrawler"]:
