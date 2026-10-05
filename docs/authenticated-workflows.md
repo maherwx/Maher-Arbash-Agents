@@ -1,5 +1,49 @@
 # Authenticated access policies and workflow invariants
 
+Ordered workflows can check exact integer state changes across steps using
+`json_delta`. Capture a counter, version or balance in minor currency units
+from a successful earlier response, then compare a later value to that baseline:
+
+```json
+"steps": [
+  {"request": {"url": "https://your-authorized-app.example/api/test-resource/42"},
+   "expect": {"statuses": [200], "json_equals": {"/id": 42}},
+   "capture": {"before_version": "/version"}},
+  {"identity": "other",
+   "request": {"url": "https://your-authorized-app.example/api/test-resource/42",
+               "method": "PATCH", "body": {"label": "authorized-test"}},
+   "expect": {"statuses": [403]}},
+  {"request": {"url": "https://your-authorized-app.example/api/test-resource/42"},
+   "expect": {"statuses": [200], "json_equals": {"/id": 42},
+              "json_delta": {"/version": {"baseline": "{{before_version}}", "eq": 0}}}}
+]
+```
+
+This example checks that a denied operation did not change the owner's resource
+version, rather than trusting the denial status alone. Use only explicitly
+authorized test resources and operations. All requests retain the existing
+scope, identity origin, pacing and budget checks; no operations are generated.
+The workflow's default identity must be configured, and `other` must be a
+supplied identity. This is a user-defined invariant, not automatically a
+confirmed vulnerability or guaranteed rollback.
+
+Each pointer requires `baseline` and one or more `eq`, `gte`, `lte` delta bounds.
+All operands are integers with at most 4,096 bits; booleans, floats, nonfinite
+numbers and oversized integers are rejected. Literal integers or exact
+`{{variable}}` substitutions are accepted. `gte`/`lte` can constrain bounded
+increases or decreases. At most 100 pointers are allowed per assertion set.
+Known invalid initial variables and undeclared dependencies fail preflight;
+invalid captured operands stop the step before its request. A missing or
+noninteger response field fails the assertion. JSON must be valid, complete,
+unambiguous and finite. Deltas, baseline values and response values are kept
+in memory; persisted checks contain only pointer, operator and pass/fail.
+Captures still update only after all assertions pass. The baseline must come
+from a meaningful successful control; this feature does not discover application
+state semantics or solve concurrency / eventual consistency automatically.
+
+The state-delta addition was reviewed statically only and is unverified at
+runtime; no tests, applications or assessments were run for this change.
+
 Each workflow can declare `cleanup_steps`, using the same request, expectation,
 identity and capture structure as its main steps. They execute after normal
 completion, invariant failure or handled transport/capture errors, using the
