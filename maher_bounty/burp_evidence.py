@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from urllib.parse import parse_qsl, urlparse
 
 from .scope_policy import filter_in_scope_urls
@@ -13,8 +14,20 @@ MAX_TRAFFIC_EVIDENCE_RECORDS = 500
 
 
 def _header_names(raw: str) -> list[str]:
+    value = str(raw or "")
     names = set()
-    for line in str(raw or "").replace("\r\n", "\n").split("\n"):
+    if value.lstrip().startswith("{"):
+        try:
+            message = json.loads(value)
+        except json.JSONDecodeError:
+            message = {}
+        headers = message.get("headers", []) if isinstance(message, dict) else []
+        for header in headers:
+            name = str(header.get("name") or "").strip().lower() if isinstance(header, dict) else ""
+            if name and name not in _SENSITIVE_HEADERS:
+                names.add(name)
+        return sorted(names)
+    for line in value.replace("\r\n", "\n").split("\n"):
         if not line:
             break
         if ":" not in line:
@@ -23,6 +36,18 @@ def _header_names(raw: str) -> list[str]:
         if name and name not in _SENSITIVE_HEADERS:
             names.add(name)
     return sorted(names)
+
+
+def _body_present(raw: str) -> bool:
+    value = str(raw or "")
+    if value.lstrip().startswith("{"):
+        try:
+            message = json.loads(value)
+        except json.JSONDecodeError:
+            message = {}
+        post_data = message.get("postData") if isinstance(message, dict) else None
+        return bool(isinstance(post_data, dict) and (post_data.get("text") or post_data.get("params")))
+    return "\r\n\r\n" in value or "\n\n" in value
 
 
 def build_scoped_traffic_evidence(records: list[dict], scope: dict) -> dict:
@@ -48,8 +73,8 @@ def build_scoped_traffic_evidence(records: list[dict], scope: dict) -> dict:
             "query_parameter_names": sorted({name for name, _ in parse_qsl(parsed.query, keep_blank_values=True)}),
             "request_header_names": _header_names(request),
             "response_header_names": _header_names(response),
-            "request_body_present": bool(request and ("\r\n\r\n" in request or "\n\n" in request)),
-            "response_body_present": bool(response and ("\r\n\r\n" in response or "\n\n" in response)),
+            "request_body_present": _body_present(request),
+            "response_body_present": _body_present(response),
         })
         if len(summaries) >= MAX_TRAFFIC_EVIDENCE_RECORDS:
             break
