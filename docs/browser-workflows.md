@@ -110,6 +110,11 @@ Tool execution now starts a new process group on POSIX and kills the group at
 timeout or cancellation, including descendants that retain stdout handles.
 Windows binds the tool to a Job Object and terminates the job on timeout. The
 job is closed on successful completion too, removing surviving descendants.
+Tool input is validated before launch: text mode requires a string, binary
+mode requires bytes-like input, and captured text input is encoded as UTF-8
+on the calling thread. Invalid or unencodable input cannot be silently lost
+in a writer thread. Timeouts must be finite numeric values or `None`; zero
+and negative values retain immediate-timeout behavior.
 Failure to create/assign the job fails the launch and kills the root instead of
 silently running without tree control. Cleanup never waits indefinitely for
 inherited pipe handles. A child deliberately escaping OS process-group controls

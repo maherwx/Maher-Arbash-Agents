@@ -1,5 +1,6 @@
 """Subprocess execution with bounded cleanup of the complete tool process tree."""
 import os
+import math
 import signal
 import subprocess
 import threading
@@ -44,7 +45,7 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job):
             threads.append(thread)
     def writer():
         try:
-            process.stdin.write(input.encode("utf-8") if isinstance(input, str) else input)
+            process.stdin.write(input)
             process.stdin.flush()
         except BrokenPipeError:
             pass
@@ -164,6 +165,13 @@ def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
         text=False, timeout=None, check=False, max_output_bytes=8 * 1024 * 1024):
     if type(max_output_bytes) is not int or max_output_bytes < 1:
         raise ValueError("max_output_bytes must be a positive integer")
+    if timeout is not None and (type(timeout) not in (int, float) or not math.isfinite(timeout)):
+        raise ValueError("timeout must be a finite number or None")
+    if input is not None:
+        if text and not isinstance(input, str):
+            raise TypeError("text input must be a string")
+        if not text and not isinstance(input, (bytes, bytearray, memoryview)):
+            raise TypeError("binary input must be bytes-like")
     if capture_output:
         if stdout is not None or stderr is not None:
             raise ValueError("capture_output conflicts with stdout/stderr")
@@ -172,6 +180,10 @@ def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
         "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
     }
     bounded = stdout == subprocess.PIPE or stderr == subprocess.PIPE
+    if bounded and input is not None:
+        # Encode on the calling thread before launch; writer-thread failures
+        # must not silently turn missing input into a successful tool run.
+        input = input.encode("utf-8") if text else bytes(input)
     process = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else None,
                                stdout=stdout, stderr=stderr, text=text and not bounded, **options)
     job = None
