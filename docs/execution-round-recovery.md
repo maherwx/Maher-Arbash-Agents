@@ -5,6 +5,13 @@ The pipeline saves follow-up execution state to
 completed round preserves actual run history, findings, decisions, known URLs,
 pending requests and the shared attempt ledger. Atomic replacement and a flushed
 temporary file avoid partially written JSON. Journal writes are limited to 8 MiB.
+Reads are also bounded directly to 8 MiB, even if a file changes during loading.
+Version 2 journals include a SHA256 checksum over their context binding, phase
+and payload. The checksum detects accidental corruption; it is not a signature
+or protection against someone who can rewrite both the payload and checksum.
+Duplicate JSON fields and non-finite numeric values are rejected. Old version 1
+journals are not automatically resumed; this format change requires a fresh
+invocation after inspecting any interrupted prior execution.
 Temporary files use private permissions where supported by the operating system.
 
 Only one process can own a journal at a time. Its exclusive lock records the
