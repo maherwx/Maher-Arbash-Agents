@@ -14,7 +14,7 @@ from .scope_policy import filter_in_scope_urls
 SUPPORTED_AGENT_TOOLS = {
     "hakrawler", "katana", "httpx", "nuclei", "dalfox", "zap-baseline.py",
     "nikto", "nmap", "tlsx", "whatweb", "wafw00f", "dnsx", "naabu", "ffuf", "gobuster",
-    "subfinder", "assetfinder", "waybackurls", "gau",
+    "subfinder", "assetfinder", "waybackurls", "gau", "alterx",
 }
 MAX_AGENT_REQUESTS = 8
 MAX_AGENT_TARGETS = 30
@@ -23,7 +23,7 @@ MAX_ZAP_ORIGINS = 2
 MAX_FOLLOWUP_ORIGINS = 2
 
 ORIGIN_TOOLS = {"hakrawler", "katana", "nikto", "zap-baseline.py", "whatweb", "wafw00f", "tlsx", "ffuf", "gobuster", "httpx"}
-HOST_TOOLS = {"nmap", "naabu", "dnsx", "subfinder", "assetfinder", "waybackurls", "gau"}
+HOST_TOOLS = {"nmap", "naabu", "dnsx", "subfinder", "assetfinder", "waybackurls", "gau", "alterx"}
 
 
 def _coverage_key(tool: str, url: str) -> str:
@@ -220,7 +220,7 @@ def run_agent_tool_requests(
 
     # Agents can request deeper, complementary passes from the installed local
     # web toolkit. Each command is selected from fixed argv templates.
-    for tool in ("httpx", "katana", "whatweb", "wafw00f", "nikto", "nmap", "tlsx", "dnsx", "naabu", "subfinder", "assetfinder", "waybackurls", "gau"):
+    for tool in ("httpx", "katana", "whatweb", "wafw00f", "nikto", "nmap", "tlsx", "dnsx", "naabu", "subfinder", "assetfinder", "waybackurls", "gau", "alterx"):
         targets = []
         seen_keys = set()
         for url in selected[tool]:
@@ -245,6 +245,55 @@ def run_agent_tool_requests(
                 runs.append({"tool": tool, "status": "missing", "target": scan_url, "reason": "agent-requested tool; binary not installed"})
                 continue
             hostname = (urlparse(scan_url).hostname or "").lower()
+            if tool == "alterx":
+                command = [tool, "-silent", "-limit", "200"]
+                generated_file = root / f"alterx-followup-{index}.txt"
+                result = _exec(command, timeout=120, output=generated_file, input_text=hostname + "\n")
+                result["target"] = scan_url
+                runs.append(result)
+                generated_hosts = [
+                    line.strip() for line in generated_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    if line.strip()
+                ] if generated_file.exists() else []
+                candidate_urls = ["https://" + host for host in generated_hosts]
+                scoped_candidates, _ = filter_in_scope_urls(candidate_urls, scope)
+                scoped_hosts = list(dict.fromkeys(urlparse(url).hostname or "" for url in scoped_candidates))
+                scoped_hosts = [host for host in scoped_hosts if host]
+                if scoped_hosts and shutil.which("dnsx"):
+                    dns_output = root / f"alterx-dnsx-{index}.txt"
+                    dns_result = _exec(
+                        ["dnsx", "-silent", "-a", "-resp"], timeout=180, output=dns_output,
+                        input_text="\n".join(scoped_hosts) + "\n",
+                    )
+                    dns_result["target"] = scan_url
+                    runs.append(dns_result)
+                    resolved_hosts = set()
+                    if dns_output.exists():
+                        for line in dns_output.read_text(encoding="utf-8", errors="ignore").splitlines():
+                            host = line.strip().split(maxsplit=1)[0] if line.strip() else ""
+                            if host in scoped_hosts:
+                                resolved_hosts.add(host)
+                    if resolved_hosts and shutil.which("httpx"):
+                        probe_file = root / f"alterx-httpx-{index}-targets.txt"
+                        probe_file.write_text("\n".join("https://" + host for host in sorted(resolved_hosts)) + "\n", encoding="utf-8")
+                        http_output = root / f"alterx-httpx-{index}.jsonl"
+                        http_result = _exec(
+                            ["httpx", "-l", str(probe_file), "-json", "-silent", "-rate-limit", "3"],
+                            timeout=180, output=http_output,
+                        )
+                        http_result["target"] = scan_url
+                        runs.append(http_result)
+                        if http_output.exists():
+                            for line in http_output.read_text(encoding="utf-8", errors="ignore").splitlines():
+                                try:
+                                    data = json.loads(line)
+                                except json.JSONDecodeError:
+                                    continue
+                                found = data.get("url") or data.get("input") or data.get("host")
+                                if isinstance(found, str):
+                                    allowed_found, _ = filter_in_scope_urls([found], scope)
+                                    new_crawl_urls.extend(url for url in allowed_found if url not in known)
+                continue
             if tool in {"subfinder", "assetfinder", "waybackurls", "gau"}:
                 if tool == "subfinder":
                     command = [tool, "-silent", "-d", hostname]
