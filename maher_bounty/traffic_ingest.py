@@ -9,6 +9,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
+class TrafficInputError(ValueError):
+    """An explicit traffic input cannot be read or parsed."""
+
+
 def _decode(value: str | None, encoded: bool = False) -> str:
     if not value:
         return ""
@@ -98,6 +102,8 @@ def _burp_identity(raw: str) -> str | None:
     return _identity_from_headers(headers)
 def load_har(path: str | Path) -> list[dict]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("log"), dict) or not isinstance(data["log"].get("entries"), list):
+        raise ValueError("HAR requires log.entries")
     out = []
     for sequence,entry in enumerate(data.get("log", {}).get("entries", [])):
         req, resp = entry.get("request", {}), entry.get("response", {})
@@ -111,6 +117,8 @@ def load_har(path: str | Path) -> list[dict]:
 
 def load_burp_xml(path: str | Path) -> list[dict]:
     root = ET.parse(path).getroot()
+    if root.tag != "items":
+        raise ValueError("Burp XML requires items root")
     out = []
     for sequence,item in enumerate(root.findall(".//item")):
         url = item.findtext("url") or ""; method = item.findtext("method") or "GET"; status_text = item.findtext("status") or ""
@@ -131,8 +139,14 @@ def load_zap_har(path: str | Path) -> list[dict]:
 
 def ingest_traffic(path: str | Path, kind: str = "auto") -> list[dict]:
     path = Path(path)
-    if kind == "burp" or (kind == "auto" and path.suffix.lower() == ".xml"):
-        return load_burp_xml(path)
-    if kind in {"har", "zap"} or path.suffix.lower() == ".har":
-        return load_zap_har(path) if kind == "zap" else load_har(path)
-    raise ValueError(f"Unsupported traffic format: {path}")
+    if not path.is_file():
+        raise TrafficInputError(f"Traffic file not found or not a regular file: {path}. Export Burp XML/HAR and pass its actual path, or omit --traffic.")
+    try:
+        if kind == "burp" or (kind == "auto" and path.suffix.lower() == ".xml"):
+            return load_burp_xml(path)
+        if kind in {"har", "zap"} or path.suffix.lower() == ".har":
+            return load_zap_har(path) if kind == "zap" else load_har(path)
+    except (OSError, ValueError, ET.ParseError, AttributeError, TypeError, KeyError) as error:
+        # Parser diagnostics can contain credentials or captured response text.
+        raise TrafficInputError(f"Cannot read traffic file as Burp XML/HAR: {path} ({type(error).__name__}). Check the export format and file permissions.") from None
+    raise TrafficInputError(f"Unsupported traffic format: {path}. Use Burp XML or HAR.")

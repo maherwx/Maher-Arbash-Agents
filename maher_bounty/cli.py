@@ -1,11 +1,12 @@
 import argparse
 import json
 import shutil
+import sys
 from pathlib import Path
 
 from .orchestrator import run, run_target
 from .result_store import build_inventory
-from .traffic_ingest import ingest_traffic
+from .traffic_ingest import ingest_traffic, TrafficInputError
 from .traffic_pipeline import analyze_traffic
 from .workflow_execution import execute_workflows
 from .continuous_service import ContinuousAnalysisService, ServiceConfig, write_status
@@ -37,6 +38,14 @@ def _service_config(args):
 
 
 def main():
+    try:
+        return _main()
+    except TrafficInputError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+
+def _main():
     p = argparse.ArgumentParser(prog="maher-bounty")
     s = p.add_subparsers(dest="cmd", required=True)
 
@@ -189,4 +198,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
