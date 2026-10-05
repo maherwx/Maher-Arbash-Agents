@@ -276,8 +276,8 @@ def validate_manifest(manifest, scope):
     if manifest.get("engine", "http") not in ("http", "browser"):
         raise ValueError("workflow engine must be http or browser")
     _validate_proxy(manifest.get("proxy"))
-    if manifest.get("proxy") is not None and manifest.get("engine", "http") != "http":
-        raise ValueError("local interception currently requires engine=http")
+    if manifest.get("proxy") and "ca_file" in manifest["proxy"] and manifest.get("engine", "http") == "browser":
+        raise ValueError("browser proxy CA must be trusted by Chromium; ca_file is HTTP-only")
     identities = manifest.get("identities", {})
     cases = manifest.get("access_cases", [])
     workflows = manifest.get("workflows", [])
@@ -494,7 +494,7 @@ def execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=N
                                    timeout=max(1, min(float(limits.get("timeout_seconds", 10)), 60)),
                                    budget=max(1, min(int(limits.get("max_requests", 200)), 2000)),
                                    total_seconds=max(1, min(float(limits.get("total_seconds", 300)), 3600)),
-                                   interval=max(0.1, float(limits.get("interval_seconds", 0.2))))
+                                   interval=max(0.1, float(limits.get("interval_seconds", 0.2))), proxy=manifest.get("proxy"))
         transport = browser
     try:
         return _execute_workflows(manifest, scope, out_dir, authorized=authorized, transport=transport)

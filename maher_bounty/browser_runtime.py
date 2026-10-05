@@ -6,12 +6,15 @@ from urllib.parse import urljoin
 from http.cookies import SimpleCookie
 
 from .scope_policy import is_in_scope_url
-from .workflow_execution import _origin, _protected_headers, _validate_browser_settings
+from .workflow_execution import _origin, _protected_headers, _validate_browser_settings, _validate_proxy
 from .burp_evidence import _safe_url
 
 
 class BrowserTransport:
-    def __init__(self, identities, scope, *, timeout=10, budget=200, total_seconds=300, interval=0.2):
+    def __init__(self, identities, scope, *, timeout=10, budget=200, total_seconds=300, interval=0.2, proxy=None):
+        self.proxy = _validate_proxy(proxy)
+        if self.proxy and "ca_file" in self.proxy:
+            raise ValueError("browser proxy CA must be trusted by Chromium; ca_file is HTTP-only")
         try:
             from playwright.sync_api import sync_playwright, Error
         except ImportError:
@@ -117,7 +120,8 @@ class BrowserTransport:
         if state and not Path(state).is_file():
             raise ValueError("browser storage_state file is missing")
         context = self.browser.new_context(extra_http_headers=headers, storage_state=state,
-                                           service_workers="block", accept_downloads=False)
+                                           service_workers="block", accept_downloads=False,
+                                           **({"proxy": {"server": self.proxy["url"]}} if self.proxy else {}))
         self.contexts[name] = context
         pending = set()
         self.pending[name] = pending
@@ -215,6 +219,7 @@ class BrowserTransport:
 
     def summary(self):
         return {"engine": "browser", "network_requests": self.count, "blocked_requests": self.blocked,
+                "local_proxy_enabled": bool(self.proxy),
                 "failed_requests": self.failed,
                 "transactions": self.transactions}
 
