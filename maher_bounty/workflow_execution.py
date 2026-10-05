@@ -22,6 +22,7 @@ from urllib.parse import urlparse, quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandler
 
 from .differential import compare_responses
+from .burp_evidence import _safe_url
 from .scope_policy import is_in_scope_url
 
 
@@ -466,7 +467,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                         raise RuntimeError("incomplete browser network evidence")
                 if all(hits):
                     findings.append({"source": "workflow_execution", "title": f"Access policy violated: {case['id']} ({name})",
-                                     "target": case["request"]["url"], "severity": "high", "validated": True,
+                                     "target": _safe_url(case["request"]["url"]), "severity": "high", "validated": True,
                                      "evidence": {"case_id": case["id"], "identity": name, "observations": rows.copy()},
                                      "basis": "explicit policy, valid allowed controls, repeatable forbidden resource proof"})
             decisions.append({"id": case["id"], "status": "completed"})
@@ -500,7 +501,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                     raise RuntimeError("incomplete workflow evidence")
                 if not all(c["passed"] for c in checks):
                     findings.append({"source": "workflow_execution", "title": f"Workflow invariant violated: {workflow['id']} step {index}",
-                                     "target": step["request"]["url"], "severity": "medium", "validated": False,
+                                     "target": _safe_url(step["request"]["url"]), "severity": "medium", "validated": False,
                                      "evidence": {"workflow_id": workflow["id"], "observations": rows.copy()},
                                      "basis": "explicit invariant failed; requires impact review"})
                     decisions.append({"id": workflow["id"], "status": "invariant_failed", "step": index})

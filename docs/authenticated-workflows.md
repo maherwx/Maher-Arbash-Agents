@@ -91,7 +91,10 @@ state checks. It does not extract HTML forms or execute JavaScript.
 
 `workflow-evidence.json` contains response hashes, lengths, status, assertion
 results, context labels and semantic comparisons. It omits credential headers
-and raw response bodies. Keep source manifests private if they contain sensitive
+and raw response bodies. Finding target URLs redact all query values while
+retaining parameter names, duplicates and the resource path. Execution still
+uses the original URL. Paths and parameter names are not redacted; keep secrets
+out of those components. Keep source manifests private if they contain sensitive
 resource markers or request bodies. Cookie authentication and ordered requests
 are supported by the default HTTP engine. For JavaScript execution, supplied
 login selectors and HTML token extraction, use the optional
