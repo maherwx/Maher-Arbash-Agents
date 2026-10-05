@@ -106,7 +106,7 @@ class LocalModelAdapter:
                         "non-destructive validation and respect all program rules. Return JSON only "
                         "with keys: status, observations, candidate_findings, evidence_notes, next_checks, tool_requests. "
                         "tool_requests must be a list of objects with tool set only to hakrawler, katana, httpx, nuclei, dalfox, zap-baseline.py, nikto, nmap, tlsx, whatweb, or wafw00f "
-                        "and targets containing only exact URLs already present in the supplied in-scope evidence. "
+                        "and targets containing only exact URLs already present in the supplied in-scope evidence, or target_refs containing IDs from scoped Burp traffic summaries. "
                         "The local coordinator invokes these tools through a bounded shell-backed allowlist with fixed safe argument templates and reuses prior coverage. "
                         "Never provide shell commands, executable paths, flags, new hosts, or payloads. Request a tool only when "
                         "evidence justifies a distinct follow-up; otherwise return an empty list."
