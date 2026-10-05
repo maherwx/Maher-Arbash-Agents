@@ -1,9 +1,11 @@
-"""Bounded local Python AST review. Never imports or executes submitted code."""
+"""Bounded multilingual source review. Never imports or executes submitted code."""
 import ast
 import hashlib
 import json
 import os
 from pathlib import Path
+from .source_languages import language_for, generic_candidates
+from .source_semgrep import review_semgrep
 
 
 EXCLUDED = {".git", ".venv", "venv", "node_modules", "vendor", "__pycache__", "build", "dist"}
@@ -117,7 +119,7 @@ def review_source(source_dir, out_dir):
     output = Path(out_dir).resolve()
     if root.is_relative_to(output):
         raise ValueError("source review output must not contain the source root")
-    files, findings, skipped = [], [], {}
+    files, findings, skipped, snapshots = [], [], {}, {}
     consumed = visited = directories = 0
     truncated = False
     def directory_error(error):
@@ -137,7 +139,7 @@ def review_source(source_dir, out_dir):
                 truncated = True
                 break
             path = Path(current) / name
-            if path.suffix != ".py" or path.is_symlink():
+            if path.is_symlink():
                 continue
             relative = path.relative_to(root).as_posix()
             try:
@@ -149,17 +151,35 @@ def review_source(source_dir, out_dir):
                     skipped["size_limit"] = skipped.get("size_limit", 0) + 1
                     continue
                 consumed += len(data)
-                tree = ast.parse(data, filename=relative)
-                if sum(1 for _ in ast.walk(tree)) > 20000:
-                    skipped["ast_limit"] = skipped.get("ast_limit", 0) + 1
+                try:
+                    text = data.decode("utf-16") if data.startswith((b"\xff\xfe", b"\xfe\xff")) else data.decode("utf-8-sig")
+                except UnicodeError:
+                    skipped["binary_or_encoding"] = skipped.get("binary_or_encoding", 0) + 1
                     continue
-                rows = _python_findings(tree, relative)[:200 - len(findings)]
+                if "\x00" in text:
+                    skipped["binary_or_encoding"] = skipped.get("binary_or_encoding", 0) + 1
+                    continue
                 digest = hashlib.sha256(data).hexdigest()
+                language = language_for(path, text)
+                rows = generic_candidates(text, relative, digest)
+                analyses = ["generic_text"]
+                if language == "python":
+                    try:
+                        tree = ast.parse(text, filename=relative)
+                        if sum(1 for _ in ast.walk(tree)) > 20000:
+                            raise SourceAnalysisLimit("AST node limit reached")
+                        rows = _python_findings(tree, relative) + rows
+                        analyses.append("python_ast")
+                    except (SyntaxError, ValueError, RecursionError) as error:
+                        kind = type(error).__name__
+                        skipped[kind] = skipped.get(kind, 0) + 1
+                rows = rows[:200 - len(findings)]
                 for row in rows:
                     row["file_sha256"] = digest
                 findings.extend(rows)
+                snapshots[relative] = data
                 files.append({"path": relative, "sha256": digest,
-                              "language": "python", "candidate_count": len(rows)})
+                              "language": language, "analyses": analyses, "candidate_count": len(rows)})
                 if len(findings) >= 200:
                     truncated = True
                     break
@@ -168,14 +188,35 @@ def review_source(source_dir, out_dir):
                 skipped[kind] = skipped.get(kind, 0) + 1
         if truncated:
             break
-    status = "partial" if skipped or truncated else "completed" if files else "no_supported_source"
+    engine, structural = review_semgrep(snapshots, files)
+    available = max(0, 200 - len(findings))
+    if len(structural) > available:
+        truncated = True
+    findings.extend(structural[:available])
+    for file in files:
+        if file["path"] in engine["scanned_files"]:
+            file["analyses"].append("semgrep_ce")
+        file["candidate_count"] = sum(1 for row in findings if row["file"] == file["path"])
+    coverage = {}
+    for file in files:
+        row = coverage.setdefault(file["language"], {"file_count": 0, "analysis_modes": set(), "parser_reviewed_files": 0})
+        row["file_count"] += 1
+        row["analysis_modes"].update(file["analyses"])
+        row["parser_reviewed_files"] += int(bool(set(file["analyses"]) & {"python_ast", "semgrep_ce"}))
+    for row in coverage.values():
+        row["analysis_modes"] = sorted(row["analysis_modes"])
+    gaps = [name for name, row in coverage.items() if row["parser_reviewed_files"] < row["file_count"]]
+    status = "partial" if skipped or truncated or gaps or engine["status"] not in {"ok", "not_applicable"} else "completed" if files else "no_supported_source"
     report = {"mode": "local_static_source_review", "status": status,
-              "languages": ["python"], "files": files, "findings": findings,
+              "languages": sorted(coverage), "language_coverage": coverage, "parser_coverage_gaps": gaps,
+              "engines": [engine], "files": files, "findings": findings,
               "file_count": len(files), "candidate_count": len(findings), "skipped": skipped,
               "truncated": truncated, "runtime_verified": False,
               "limitations": ["heuristic intra-region propagation; no interprocedural/control-flow proof",
                               "sanitizers, import shadowing and generic execute methods need manual review",
-                              "no source execution, server-source download, JavaScript or other language analysis"]}
+                              "generic text checks work across text languages but do not prove dataflow",
+                              "parser coverage depends on configured local rules and installed CE support",
+                              "binary files and unsupported encodings are not reviewed; no server-source download"]}
     output.mkdir(parents=True, exist_ok=True)
     (output / "source-review.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report

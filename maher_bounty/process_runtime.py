@@ -162,7 +162,7 @@ def _kill_tree(process, job=None):
 
 
 def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
-        text=False, timeout=None, check=False, max_output_bytes=8 * 1024 * 1024):
+        text=False, timeout=None, check=False, max_output_bytes=8 * 1024 * 1024, env=None):
     if type(max_output_bytes) is not int or max_output_bytes < 1:
         raise ValueError("max_output_bytes must be a positive integer")
     if timeout is not None and (type(timeout) not in (int, float) or not math.isfinite(timeout)):
@@ -185,7 +185,7 @@ def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
         # must not silently turn missing input into a successful tool run.
         input = input.encode("utf-8") if text else bytes(input)
     process = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else None,
-                               stdout=stdout, stderr=stderr, text=text and not bounded, **options)
+                               stdout=stdout, stderr=stderr, text=text and not bounded, env=env, **options)
     job = None
     try:
         if os.name == "nt":

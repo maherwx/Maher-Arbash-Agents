@@ -58,7 +58,7 @@ def _main():
     r.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
     r.add_argument("--authorized", action="store_true", help="Confirm permission for active checks against the supplied scope")
     r.add_argument("--workflow-manifest", default=None, help="JSON manifest of test identities, access policies and workflow invariants")
-    r.add_argument("--source-dir", default=None, help="Local application source directory for static Python review")
+    r.add_argument("--source-dir", default=None, help="Local application source directory for multilingual static review")
 
     auto = s.add_parser("auto-run", help="Collect target inventory and run the full collaborative pipeline")
     auto.add_argument("--target", required=True, help="Authorized website/domain target")
@@ -67,9 +67,9 @@ def _main():
     auto.add_argument("--out", default="results/auto")
     auto.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
     auto.add_argument("--workflow-manifest", default=None, help="Execute authenticated access policies and workflow invariants")
-    auto.add_argument("--source-dir", default=None, help="Local application source directory for static Python review")
+    auto.add_argument("--source-dir", default=None, help="Local application source directory for multilingual static review")
 
-    source = s.add_parser("source-review", help="Review supplied local Python source without executing it or making network requests")
+    source = s.add_parser("source-review", help="Review multilingual local source using native checks and optional local Semgrep CE")
     source.add_argument("--source-dir", required=True)
     source.add_argument("--out", default="results/source-review")
 
