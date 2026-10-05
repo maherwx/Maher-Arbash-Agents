@@ -236,8 +236,9 @@ def run_agent_tool_requests(
 ) -> dict:
     """Run bounded, allowlisted shell-backed tool follow-ups on scoped URLs.
 
-    Model output selects a tool and exact known URL only. Hakrawler output is
-    re-validated against scope before it can feed a one-pass Nuclei follow-up.
+    Model output or the deterministic local coordinator selects allowlisted
+    tools and exact known URLs. Discovered output is re-validated against scope
+    before it can feed downstream validators.
     """
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
