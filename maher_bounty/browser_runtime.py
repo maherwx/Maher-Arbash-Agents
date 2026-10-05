@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 from http.cookies import SimpleCookie
 
 from .scope_policy import is_in_scope_url
-from .workflow_execution import _origin, _protected_headers
+from .workflow_execution import _origin, _protected_headers, _validate_browser_settings
 from .burp_evidence import _safe_url
 
 
@@ -137,6 +137,8 @@ class BrowserTransport:
     def __call__(self, name, spec):
         if self._closed:
             raise RuntimeError("browser transport is closed")
+        settings = spec.get("browser", {})
+        _validate_browser_settings(settings)
         if not self._allowed(name, spec["url"]):
             raise ValueError("browser request outside identity origin/scope")
         if spec.get("method", "GET").upper() != "GET" or "body" in spec:
@@ -155,9 +157,6 @@ class BrowserTransport:
             page.set_default_timeout(min(self.timeout, remaining) * 1000)
         refresh_timeout()
         page.set_extra_http_headers(spec.get("headers", {}))
-        settings = spec.get("browser", {})
-        if "wait_for_network_idle" in settings and type(settings["wait_for_network_idle"]) is not bool:
-            raise ValueError("wait_for_network_idle must be a boolean")
         main_responses = []
         def observed(response):
             if response.request.is_navigation_request() and response.request.frame == page.main_frame:

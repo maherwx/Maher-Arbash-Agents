@@ -43,6 +43,13 @@ locator; prefer a locator specific to the completed application state. Response
 proofs refer to rendered DOM text (default body or `body_selector`), not merely
 the original HTML. Browser navigation uses GET; mutations use explicit form
 actions in workflows. Access matrices cannot contain repeated form actions.
+The complete manifest is checked before execution: engine names, supported
+browser settings, action kinds/fields, nonempty locators, fill value sources
+and DOM capture mappings must be valid. Browser settings require
+`engine=browser`; the HTTP engine cannot silently ignore a browser plan.
+Direct browser calls apply the same structural checks before navigation.
+This validates plan structure, not whether selectors exist in the live page
+or whether dynamically resolved values/environment credentials are available.
 
 All browser HTTP requests, including scripts and fetch/XHR, pass through origin
 and scope checks, network budgets and rate limits. Redirect responses are fetched

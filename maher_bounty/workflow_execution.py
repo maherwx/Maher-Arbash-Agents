@@ -41,6 +41,46 @@ def _protected_headers(identity):
         header.lower() for header in identity.get("headers_env", {})}
 
 
+def _validate_browser_settings(settings):
+    supported = {"actions", "wait_for", "wait_for_network_idle", "body_selector", "capture_dom"}
+    if not isinstance(settings, dict) or set(settings) - supported:
+        raise ValueError("browser settings require supported keys")
+    if "wait_for_network_idle" in settings and type(settings["wait_for_network_idle"]) is not bool:
+        raise ValueError("wait_for_network_idle must be a boolean")
+    for key in ("wait_for", "body_selector"):
+        if key in settings and (not isinstance(settings[key], str) or not settings[key].strip()):
+            raise ValueError("browser locator must be a nonempty string")
+    actions = settings.get("actions", [])
+    if not isinstance(actions, list):
+        raise ValueError("browser actions must be a list")
+    for action in actions:
+        if not isinstance(action, dict):
+            raise ValueError("browser action must be an object")
+        kind = action.get("kind")
+        if kind not in ("fill", "click", "check", "select"):
+            raise ValueError("unsupported browser action")
+        keys = {"kind", "selector"} | ({"value", "value_env"} if kind == "fill" else {"value"} if kind == "select" else set())
+        if set(action) - keys or not isinstance(action.get("selector"), str) or not action["selector"].strip():
+            raise ValueError("invalid browser action fields or selector")
+        if kind == "fill":
+            if ("value" in action) == ("value_env" in action):
+                raise ValueError("fill requires exactly one value or value_env")
+            if "value_env" in action and (not isinstance(action["value_env"], str) or not action["value_env"].strip()):
+                raise ValueError("invalid browser value_env")
+        if kind in ("fill", "select") and "value_env" not in action and action.get("value") is None:
+            raise ValueError("browser action requires a value")
+    captures = settings.get("capture_dom", {})
+    if not isinstance(captures, dict):
+        raise ValueError("capture_dom must be a mapping")
+    for variable, capture in captures.items():
+        if not isinstance(variable, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", variable):
+            raise ValueError("invalid DOM capture variable")
+        if (not isinstance(capture, dict) or set(capture) - {"selector", "attribute"}
+                or not isinstance(capture.get("selector"), str) or not capture["selector"].strip()
+                or ("attribute" in capture and (not isinstance(capture["attribute"], str) or not capture["attribute"].strip()))):
+            raise ValueError("invalid DOM capture specification")
+
+
 def _json_pairs(pairs):
     result = {}
     for key, value in pairs:
@@ -204,6 +244,8 @@ def _resolve(value, variables, *, url=False):
 def validate_manifest(manifest, scope):
     if not isinstance(manifest, dict):
         raise ValueError("workflow manifest must be an object")
+    if manifest.get("engine", "http") not in ("http", "browser"):
+        raise ValueError("workflow engine must be http or browser")
     identities = manifest.get("identities", {})
     cases = manifest.get("access_cases", [])
     workflows = manifest.get("workflows", [])
@@ -252,8 +294,9 @@ def validate_manifest(manifest, scope):
             requests.append((step.get("request", {}), name))
     for request, name in requests:
         settings = request.get("browser", {})
-        if "wait_for_network_idle" in settings and type(settings["wait_for_network_idle"]) is not bool:
-            raise ValueError("wait_for_network_idle must be a boolean")
+        _validate_browser_settings(settings)
+        if settings and manifest.get("engine", "http") != "browser":
+            raise ValueError("browser settings require engine=browser")
         url = request.get("url", "")
         if not is_in_scope_url(url, scope) or urlparse(url).fragment:
             raise ValueError("request URL is outside scope or contains a fragment")
