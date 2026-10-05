@@ -62,7 +62,8 @@ def _assertions(response, expected):
 def _observation(response, checks):
     body = response["body"].encode("utf-8")
     return {"status": response["status"], "body_sha256": hashlib.sha256(body).hexdigest(),
-            "body_bytes": len(body), "truncated": response.get("truncated", False), "assertions": checks}
+            "body_bytes": len(body), "truncated": response.get("truncated", False), "assertions": checks,
+            "representation": "rendered_dom" if response.get("browser_derived") else "http_body"}
 
 
 def _resolve(value, variables, *, url=False):
@@ -105,6 +106,8 @@ def validate_manifest(manifest, scope):
         request = case.get("request", {})
         if request.get("method", "GET").upper() not in {"GET", "HEAD"}:
             raise ValueError("access matrix uses read-only requests; use workflows for mutations")
+        if request.get("browser", {}).get("actions"):
+            raise ValueError("access matrices cannot repeat form actions; use workflows")
         requests.extend((request, name) for name in allowed + denied)
     for workflow in workflows:
         if workflow.get("id") in names or not isinstance(workflow.get("id"), str):
@@ -125,6 +128,8 @@ def validate_manifest(manifest, scope):
         if not origin or _origin(url) != _origin(origin):
             raise ValueError("identity origin must match the request origin")
         method = request.get("method", "GET").upper()
+        if manifest.get("engine") == "browser" and (method != "GET" or "body" in request):
+            raise ValueError("browser requests require GET navigation; use browser form actions for mutations")
         if method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}:
             raise ValueError("unsupported HTTP method")
         if any(k.lower() in {"authorization", "cookie", "host", "proxy-authorization"} for k in request.get("headers", {})):
@@ -177,6 +182,30 @@ class Transport:
 
 
 def execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=None):
+    if not authorized:
+        raise ValueError("workflow execution requires explicit authorization")
+    validate_manifest(manifest, scope)
+    engine = manifest.get("engine", "http")
+    if engine not in {"http", "browser"}:
+        raise ValueError("unknown workflow engine")
+    browser = None
+    if engine == "browser" and transport is None:
+        from .browser_runtime import BrowserTransport
+        limits = manifest.get("limits", {})
+        browser = BrowserTransport(manifest["identities"], scope,
+                                   timeout=max(1, min(float(limits.get("timeout_seconds", 10)), 60)),
+                                   budget=max(1, min(int(limits.get("max_requests", 200)), 2000)),
+                                   total_seconds=max(1, min(float(limits.get("total_seconds", 300)), 3600)),
+                                   interval=max(0.1, float(limits.get("interval_seconds", 0.2))))
+        transport = browser
+    try:
+        return _execute_workflows(manifest, scope, out_dir, authorized=authorized, transport=transport)
+    finally:
+        if browser:
+            browser.close()
+
+
+def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=None):
     if not authorized:
         raise ValueError("workflow execution requires explicit authorization")
     validate_manifest(manifest, scope)
@@ -256,6 +285,7 @@ def execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=N
                     break
                 for variable, pointer in step.get("capture", {}).items():
                     variables[variable] = _json_value(response["body"], pointer)
+                variables.update(response.get("captured", {}))
             else:
                 decisions.append({"id": workflow["id"], "status": "completed"})
         except (OSError, URLError, RuntimeError, ValueError, KeyError, IndexError, TypeError) as exc:
@@ -264,6 +294,8 @@ def execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=N
 
     result = {"status": "partial" if any(d["status"] == "inconclusive" for d in decisions) else "completed",
               "requests": count, "decisions": decisions, "observations": observations, "findings": findings}
+    if hasattr(sender, "summary"):
+        result["transport"] = sender.summary()
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
     (root / "workflow-evidence.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

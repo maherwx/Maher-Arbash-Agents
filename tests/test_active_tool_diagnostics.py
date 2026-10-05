@@ -7,7 +7,7 @@ from maher_bounty.active_testing import _exec
 
 class ActiveToolDiagnosticsTests(unittest.TestCase):
     @patch("maher_bounty.active_testing.shutil.which", return_value="/usr/bin/nuclei")
-    @patch("maher_bounty.active_testing.subprocess.run")
+    @patch("maher_bounty.active_testing.run_process")
     def test_nonzero_exit_preserves_stderr_and_exit_code(self, run, which):
         run.return_value = subprocess.CompletedProcess(
             args=["nuclei"], returncode=2, stdout="", stderr="no templates found"
@@ -21,7 +21,7 @@ class ActiveToolDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["timeout_seconds"], 182)
 
     @patch("maher_bounty.active_testing.shutil.which", return_value="/usr/bin/nuclei")
-    @patch("maher_bounty.active_testing.subprocess.run", side_effect=subprocess.TimeoutExpired("nuclei", 1, stderr=b"network stalled"))
+    @patch("maher_bounty.active_testing.run_process", side_effect=subprocess.TimeoutExpired("nuclei", 1, stderr=b"network stalled"))
     def test_timeout_preserves_stderr(self, run, which):
         result = _exec(["nuclei", "-u", "https://example.test/"], timeout=1)
         self.assertEqual(result["status"], "timeout")

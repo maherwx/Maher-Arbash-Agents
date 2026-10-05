@@ -173,6 +173,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             active_testing["findings"] = _dedupe([*active_testing.get("findings", []), *workflow_execution["findings"]])
             active_testing["unique_findings"] = len(active_testing["findings"])
             store.checkpoint(run_id, "workflow_execution", workflow_execution)
+        active_testing["workflow_execution"] = workflow_execution
 
         print("[intelligence] Building application model and evidence graph", flush=True)
         intelligence_target = target or inventory.get("target") or ""

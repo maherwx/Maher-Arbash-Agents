@@ -61,7 +61,9 @@ state checks. It does not extract HTML forms or execute JavaScript.
 results, context labels and semantic comparisons. It omits credential headers
 and raw response bodies. Keep source manifests private if they contain sensitive
 resource markers or request bodies. Cookie authentication and ordered requests
-are supported; JavaScript execution, automatic login discovery, HTML token
-extraction, automatic token refresh and browser-only workflows are not yet supported.
+are supported by the default HTTP engine. For JavaScript execution, supplied
+login selectors and HTML token extraction, use the optional
+[browser engine](browser-workflows.md). Automatic login discovery and automatic
+token refresh remain unsupported.
 Request and run budgets bound new work; an already running request can extend
 beyond the run deadline by its per-request timeout.

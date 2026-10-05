@@ -93,7 +93,7 @@ class ActiveTestingScopeTests(unittest.TestCase):
     def test_nuclei_missing_templates_is_reported_as_blocked(self):
         completed = subprocess.CompletedProcess(["nuclei"], 1, "", "no templates found in path")
         with patch("maher_bounty.active_testing.shutil.which", return_value="/usr/bin/nuclei"), \
-             patch("maher_bounty.active_testing.subprocess.run", return_value=completed):
+             patch("maher_bounty.active_testing.run_process", return_value=completed):
             result = _exec(["nuclei", "-l", "targets.txt"], timeout=1)
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["error_category"], "nuclei_templates_missing")

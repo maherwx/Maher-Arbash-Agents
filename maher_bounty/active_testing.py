@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from .scope_policy import filter_in_scope_urls, scope_target_urls
 from .tool_advisor import recommend_tools
+from .process_runtime import run as run_process
 
 SAFE_CONTENT_PATHS = (
     "robots.txt", "sitemap.xml", "security.txt", ".well-known/security.txt",
@@ -31,7 +32,7 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
         return {"tool": tool, "status": "missing", "command": cmd, "findings": 0, "stderr_tail": ""}
     print(f"[ACTIVE] {tool:<12} RUN timeout={effective_timeout}s (+180s tool allowance)", flush=True)
     try:
-        cp = subprocess.run(cmd, input=input_text, capture_output=True, text=True, timeout=effective_timeout, check=False)
+        cp = run_process(cmd, input=input_text, capture_output=True, text=True, timeout=effective_timeout, check=False)
         combined = (cp.stdout or "") + ("\n" + cp.stderr if cp.stderr else "")
         if output:
             output.parent.mkdir(parents=True, exist_ok=True)
@@ -40,7 +41,7 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
         stdout_tail = _tail(cp.stdout, 1000)
         status = "ok" if cp.returncode == 0 else "nonzero"
         error_category = None
-        diagnostic_text = (cp.stderr or "").lower()
+        diagnostic_text = ((cp.stderr or "") + "\n" + (cp.stdout or "")).lower()
         if tool == "nuclei" and cp.returncode != 0 and any(
             marker in diagnostic_text for marker in ("no templates found", "could not find template")
         ):
@@ -66,6 +67,10 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
             "tool": tool, "status": "timeout", "command": cmd, "timeout_seconds": effective_timeout, "output": str(output) if output else None,
             "stderr_tail": stderr_tail, "stdout_tail": partial[-1000:],
         }
+    except OSError as exc:
+        return {"tool": tool, "status": "nonzero", "returncode": None, "command": cmd,
+                "timeout_seconds": effective_timeout, "error_category": "process_launch_failed",
+                "stderr_tail": _tail(str(exc)), "stdout_tail": ""}
 
 
 def _nuclei_findings(path: Path) -> list[dict]:
