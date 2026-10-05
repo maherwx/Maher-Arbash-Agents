@@ -3,6 +3,8 @@ import subprocess
 import sys
 import time
 import unittest
+import tempfile
+from pathlib import Path
 
 from maher_bounty.process_runtime import run
 
@@ -34,3 +36,23 @@ class ProcessRuntimeTests(unittest.TestCase):
         self.assertEqual(run([sys.executable, "-c", "pass"], timeout=5).returncode, 0)
         with self.assertRaises(subprocess.CalledProcessError):
             run([sys.executable, "-c", "raise SystemExit(4)"], check=True, timeout=5)
+
+    def test_completed_parent_cleans_up_children_without_inherited_pipes(self):
+        # Child confirms startup before parent exits, then would write a
+        # delayed marker if invocation cleanup leaves it running.
+        with tempfile.TemporaryDirectory() as td:
+            for code, check in [(0, False), (4, False), (4, True)]:
+                with self.subTest(code=code, check=check):
+                    ready = Path(td) / f"ready-{code}-{check}"
+                    leaked = Path(td) / f"leaked-{code}-{check}"
+                    child = "import sys,time; from pathlib import Path; Path(sys.argv[1]).touch(); time.sleep(1); Path(sys.argv[2]).touch()"
+                    parent = "import subprocess,sys,time; from pathlib import Path; subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2],sys.argv[3]],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); deadline=time.monotonic()+3\nwhile not Path(sys.argv[2]).exists() and time.monotonic()<deadline: time.sleep(.01)\nsys.exit(int(sys.argv[4]))"
+                    command = [sys.executable, "-c", parent, child, str(ready), str(leaked), str(code)]
+                    if check:
+                        with self.assertRaises(subprocess.CalledProcessError):
+                            run(command, capture_output=True, timeout=5, check=True)
+                    else:
+                        self.assertEqual(run(command, capture_output=True, timeout=5).returncode, code)
+                    self.assertTrue(ready.exists(), "child must start for regression to be meaningful")
+                    time.sleep(1.2)
+                    self.assertFalse(leaked.exists(), "completed tool left a child process running")
