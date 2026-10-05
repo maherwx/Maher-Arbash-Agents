@@ -26,6 +26,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPCooki
 from .differential import compare_responses
 from .burp_evidence import _safe_url
 from .scope_policy import is_in_scope_url
+from .artifact_io import write_json_atomic
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -378,6 +379,20 @@ def validate_manifest(manifest, scope):
         if request.get("browser", {}).get("actions"):
             raise ValueError("access matrices cannot repeat form actions; use workflows")
         requests.extend((request, name) for name in allowed + denied)
+        if "negative_control" in case:
+            negative = case["negative_control"]
+            if not isinstance(negative, dict) or set(negative) != {"request"} or not isinstance(negative["request"], dict):
+                raise ValueError("negative_control requires exactly one request object")
+            negative_request = negative["request"]
+            if negative_request.get("url") == request.get("url"):
+                raise ValueError("negative control requires a distinct supplied resource URL")
+            method = negative_request.get("method", "GET")
+            if not isinstance(method, str) or method.upper() not in {"GET", "HEAD"} or "body" in negative_request:
+                raise ValueError("negative control requires a read-only request without a body")
+            _validate_browser_settings(negative_request.get("browser", {}))
+            if negative_request.get("browser", {}).get("actions"):
+                raise ValueError("negative control cannot repeat browser actions")
+            requests.extend((negative_request, name) for name in allowed)
     for workflow in workflows:
         if workflow.get("id") in names or not isinstance(workflow.get("id"), str):
             raise ValueError("workflow ids must be unique strings")
@@ -651,6 +666,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
 
     for case in manifest.get("access_cases", []):
         rows, control = [], None
+        phase = "allowed_control"
         try:
             # Repeat the allowed baseline to reject unstable or invalid controls.
             for name in case["allowed"]:
@@ -663,6 +679,29 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                     if not valid:
                         raise RuntimeError("allowed baseline failed resource proof")
                     control = response
+            specificity = "not_configured"
+            if "negative_control" in case:
+                phase = "negative_control"
+                # Use only positive content fields to test specificity. A status,
+                # absence or numeric-bound failure must not hide a matching ID.
+                content_proof = {key: case["proof"][key] for key in ("contains", "json_equals") if case["proof"].get(key)}
+                for name in case["allowed"]:
+                    for repeat in range(2):
+                        response = send(name, case["negative_control"]["request"])
+                        checks = _assertions(response, content_proof)
+                        matches = bool(checks) and all(c["passed"] for c in checks)
+                        rows.append({"identity": name, "role": "negative_control", "repeat": repeat,
+                                     **_observation(response, checks), "resource_proof_passed": matches})
+                        if (response["status"] != 200 or response.get("truncated")
+                                or response.get("network_incomplete")):
+                            raise RuntimeError("incomplete negative control evidence")
+                        if content_proof.get("json_equals"):
+                            # Invalid JSON is not evidence of a different object.
+                            _decode_json(response["body"])
+                        if matches:
+                            raise RuntimeError("resource proof also matches the negative control")
+                specificity = "passed_supplied_negative_control"
+            phase = "denied_observation"
             for name in case["denied"]:
                 hits = []
                 for repeat in range(2):
@@ -680,12 +719,14 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                 if all(hits):
                     findings.append({"source": "workflow_execution", "title": f"Access policy violated: {case['id']} ({name})",
                                      "target": _safe_url(case["request"]["url"]), "severity": "high", "validated": True,
-                                     "evidence": {"case_id": case["id"], "identity": name, "observations": rows.copy()},
+                                     "evidence": {"case_id": case["id"], "identity": name, "observations": rows.copy(),
+                                                  "proof_specificity": specificity},
                                      "basis": "explicit policy, valid allowed controls, repeatable forbidden resource proof"})
-            decisions.append({"id": case["id"], "status": "completed"})
-        except (OSError, URLError, RuntimeError, ValueError, HTTPException) as exc:
+            decisions.append({"id": case["id"], "status": "completed", "proof_specificity": specificity})
+        except (OSError, URLError, RuntimeError, ValueError, RecursionError, HTTPException) as exc:
             # Do not persist exception text, which can contain credential values.
-            decisions.append({"id": case["id"], "status": "inconclusive", "error_type": type(exc).__name__})
+            decisions.append({"id": case["id"], "status": "inconclusive", "phase": phase,
+                              "error_type": type(exc).__name__})
         observations.append({"id": case["id"], "observations": rows})
 
     for workflow in manifest.get("workflows", []):
@@ -733,5 +774,5 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
         result["transport"] = sender.summary()
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
-    (root / "workflow-evidence.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(root / "workflow-evidence.json", result)
     return result

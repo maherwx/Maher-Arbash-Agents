@@ -21,6 +21,34 @@ incomplete cleanup makes the run partial without creating a vulnerability or
 erasing earlier findings. This is explicit best-effort cleanup, not guaranteed
 rollback after interruption or process crash. Keep enough run budget for it.
 
+An access case may also supply an optional comparison resource:
+
+```json
+"negative_control": {
+  "request": {"url": "https://your-authorized-app.example/api/orders/43"}
+}
+```
+
+Choose an accessible test resource that must not match this case's positive
+`contains` / `json_equals` proof. It runs twice under each allowed identity,
+after allowed controls and before forbidden observations. Its URL must differ
+from the target URL and pass the same scope, exact identity origin, credential
+header and browser-setting validation. Only GET/HEAD without a body or browser
+actions is accepted. No comparison URL, identity or resource ID is invented.
+The extra requests share the existing run budget and sessions.
+
+Both observations must be complete HTTP 200 responses and fail the positive
+content proof. JSON proofs also require a valid unambiguous finite JSON document;
+a non-200 response, malformed JSON, truncation, unfinished browser requests or a
+matching comparison resource stops the case as inconclusive before forbidden
+requests. Status, absence and numeric-bound assertions are excluded from this
+specificity check so their failure cannot conceal a matching resource proof.
+Evidence labels the comparison observations and records `proof_specificity` as
+`passed_supplied_negative_control` or `not_configured`. Inconclusive case decisions
+identify the failing phase without copying exception text. This checks one
+supplied comparison resource, not uniqueness across every possible response.
+Existing cases without a comparison retain their request count and behavior.
+
 Access-policy evidence repeats each forbidden identity's resource proof twice.
 Two matches can confirm a policy violation; two misses complete that check
 without a finding. One match and one miss are inconclusive, stop that case and
@@ -136,6 +164,12 @@ and the resolved URL is checked against scope and identity origin again. Missing
 captures stop the workflow as inconclusive before another request. This supports
 CSRF values returned in JSON and dynamic object creation followed by
 state checks. It does not extract HTML forms or execute JavaScript.
+
+The evidence writer now uses bounded atomic JSON replacement (8 MiB): a
+serialization, size or write failure before replacement preserves the previous
+artifact. This does not guarantee recovery from process crashes or power loss.
+This change was reviewed statically only; no tests, tool executions or target
+assessments were run, and the new behavior remains unverified at runtime.
 
 `workflow-evidence.json` contains response hashes, lengths, status, assertion
 results, context labels and semantic comparisons. It omits credential headers
