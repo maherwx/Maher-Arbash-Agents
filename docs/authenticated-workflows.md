@@ -48,6 +48,16 @@ baseline, truncated body, or network failure cannot confirm forbidden access.
 Workflow invariant failures require impact review; they are not automatically
 confirmed security findings. JSON assertions use JSON Pointer syntax.
 
+Each workflow step may specify `"identity":"other"` to override the workflow's
+default identity. Only configured identities are accepted, and every request is
+validated against that step's identity origin before and after substitution.
+All participating sessions reset once at workflow start and remain isolated;
+returning to an earlier identity preserves its cookies or browser context.
+Captures belong to the workflow, allowing an owner-created resource ID to be
+used in a second identity's explicitly expected denial step and a subsequent
+owner state check. Evidence records the identity used for each step. A failed
+denial or state assertion stops the workflow and requires impact review.
+
 After a successful step, `"capture":{"order_id":"/id","csrf":"/csrf"}`
 stores selected response JSON fields in that workflow's private memory. Later
 requests and expectations can reference `{{order_id}}` or `{{csrf}}`. Entire
