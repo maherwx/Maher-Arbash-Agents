@@ -11,6 +11,8 @@ import math
 import os
 import re
 import socket
+import ssl
+import ipaddress
 import threading
 import time
 from http.cookiejar import CookieJar, Cookie
@@ -19,7 +21,7 @@ from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, quote
-from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandler
+from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandler, HTTPSHandler
 
 from .differential import compare_responses
 from .burp_evidence import _safe_url
@@ -28,6 +30,33 @@ from .scope_policy import is_in_scope_url
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _validate_proxy(proxy):
+    if proxy is None:
+        return None
+    if not isinstance(proxy, dict) or set(proxy) - {"url", "ca_file"} or not isinstance(proxy.get("url"), str):
+        raise ValueError("proxy requires url and optional ca_file")
+    parsed = urlparse(proxy["url"])
+    try:
+        loopback = ipaddress.ip_address(parsed.hostname or "").is_loopback
+        port = parsed.port
+    except ValueError:
+        raise ValueError("proxy requires a literal loopback address and valid port") from None
+    if (parsed.scheme != "http" or not loopback or not port or parsed.username is not None
+            or parsed.password is not None or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+        raise ValueError("proxy must be a credential-free local HTTP listener")
+    if "ca_file" in proxy and (not isinstance(proxy["ca_file"], str) or not Path(proxy["ca_file"]).is_file()):
+        raise ValueError("proxy CA file is missing")
+    return proxy
+
+
+class LocalProxyHandler(ProxyHandler):
+    def proxy_open(self, request, proxy, protocol):
+        # Explicit interception must not be bypassed by ambient NO_PROXY.
+        # set_proxy preserves HTTPS CONNECT tunnelling and original target TLS.
+        request.set_proxy(urlparse(proxy).netloc, "http")
         return None
 
 
@@ -246,6 +275,9 @@ def validate_manifest(manifest, scope):
         raise ValueError("workflow manifest must be an object")
     if manifest.get("engine", "http") not in ("http", "browser"):
         raise ValueError("workflow engine must be http or browser")
+    _validate_proxy(manifest.get("proxy"))
+    if manifest.get("proxy") is not None and manifest.get("engine", "http") != "http":
+        raise ValueError("local interception currently requires engine=http")
     identities = manifest.get("identities", {})
     cases = manifest.get("access_cases", [])
     workflows = manifest.get("workflows", [])
@@ -315,8 +347,10 @@ def validate_manifest(manifest, scope):
 
 
 class Transport:
-    def __init__(self, identities, timeout=10, max_bytes=1048576, interval=0.2, budget=200, deadline=None):
+    def __init__(self, identities, timeout=10, max_bytes=1048576, interval=0.2, budget=200, deadline=None, proxy=None):
         self.identities = identities
+        self.proxy = _validate_proxy(proxy)
+        self.tls_context = ssl.create_default_context(cafile=self.proxy.get("ca_file") if self.proxy else None)
         self.timeout, self.max_bytes, self.interval, self.budget = timeout, max_bytes, interval, budget
         self.count, self.last = 0, 0.0
         self.deadline = deadline if deadline is not None else float("inf")
@@ -352,7 +386,8 @@ class Transport:
         jar = CookieJar()
         for cookie in self.seed_cookies[name]:
             jar.set_cookie(cookie)
-        self.openers[name] = build_opener(ProxyHandler({}), NoRedirect(), HTTPCookieProcessor(jar))
+        proxy_handler = LocalProxyHandler({"http": self.proxy["url"], "https": self.proxy["url"]}) if self.proxy else ProxyHandler({})
+        self.openers[name] = build_opener(proxy_handler, HTTPSHandler(context=self.tls_context), NoRedirect(), HTTPCookieProcessor(jar))
 
     def __call__(self, name, spec):
         parsed = urlparse(spec["url"])
@@ -477,7 +512,8 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
     budget = max(1, min(int(limits.get("max_requests", 200)), 2000))
     deadline = time.monotonic() + max(1, min(float(limits.get("total_seconds", 300)), 3600))
     sender = transport or Transport(manifest["identities"], timeout=timeout, budget=budget,
-                                   interval=max(0.1, float(limits.get("interval_seconds", 0.2))), deadline=deadline)
+                                   interval=max(0.1, float(limits.get("interval_seconds", 0.2))), deadline=deadline,
+                                   proxy=manifest.get("proxy"))
     observations, findings, decisions = [], [], []
     count = 0
 
