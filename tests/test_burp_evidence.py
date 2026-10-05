@@ -1,6 +1,6 @@
 import unittest
 
-from maher_bounty.burp_evidence import build_scoped_traffic_evidence
+from maher_bounty.burp_evidence import build_scoped_traffic_evidence, build_traffic_target_references
 
 
 class BurpEvidenceTests(unittest.TestCase):
@@ -23,7 +23,9 @@ class BurpEvidenceTests(unittest.TestCase):
         self.assertEqual(result["record_count"], 1)
         self.assertEqual(result["out_of_scope_records_filtered"], 1)
         row = result["records"][0]
-        self.assertEqual(row["url"], route)
+        self.assertEqual(row["url"], "https://app.example.test/api/items?id=%5Bredacted%5D")
+        references = build_traffic_target_references(records, {"assets": ["https://app.example.test"], "out_of_scope": []})
+        self.assertEqual(references[row["target_ref"]], route)
         self.assertEqual(row["query_parameter_names"], ["id"])
         self.assertIn("content-type", row["request_header_names"])
         self.assertNotIn("authorization", row["request_header_names"])
@@ -56,7 +58,10 @@ class BurpEvidenceTests(unittest.TestCase):
         self.assertEqual(result["records"][0]["request_header_names"], ["x-trace"])
         self.assertNotIn("private body", str(result))
         self.assertNotIn("secret", str(result))
+        self.assertNotIn("private", str(result))
         self.assertTrue(result["records"][0]["request_body_present"])
+        refs = build_traffic_target_references([record], {"assets": ["https://app.example.test"], "out_of_scope": []})
+        self.assertEqual(refs[result["records"][0]["target_ref"]], record["url"])
 
 
 if __name__ == "__main__":
