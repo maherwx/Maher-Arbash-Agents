@@ -287,7 +287,7 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
         if parsed.scheme.lower() == "https" and origin_key not in seen_tls_origins:
             seen_tls_origins.add(origin_key)
             runs.append(_exec(
-                ["tlsx", "-u", scan_target, "-silent", "-san", "-cn"],
+                ["tlsx", "-u", scan_target, "-silent", "-json"],
                 timeout=60, output=host_dir / "tlsx.txt",
             ))
         elif parsed.scheme.lower() != "https":
