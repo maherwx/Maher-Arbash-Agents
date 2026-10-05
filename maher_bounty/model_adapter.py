@@ -1,7 +1,22 @@
+import ipaddress
 import json
 import os
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
+
+
+def _is_loopback_model_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or not host:
+            return False
+        if host == "localhost":
+            return True
+        return ipaddress.ip_address(host).is_loopback
+    except (ValueError, TypeError):
+        return False
 
 
 _AGENT_CONTEXT_FIELDS = (
@@ -59,9 +74,11 @@ class LocalModelAdapter:
     """
 
     def __init__(self):
-        self.url = os.getenv("MAHER_MODEL_URL", "").strip()
+        configured_url = os.getenv("MAHER_MODEL_URL", "").strip()
+        self.local_endpoint_allowed = not configured_url or _is_loopback_model_url(configured_url)
+        self.url = configured_url if self.local_endpoint_allowed else ""
         self.model = os.getenv("MAHER_MODEL_ID", "").strip()
-        self.timeout = int(os.getenv("MAHER_MODEL_TIMEOUT", "120"))
+        self.timeout = max(1, min(int(os.getenv("MAHER_MODEL_TIMEOUT", "120")), 300))
 
     @property
     def enabled(self):
@@ -69,7 +86,7 @@ class LocalModelAdapter:
 
     @property
     def mode(self):
-        return "local_model" if self.enabled else "planning_only"
+        return "local_model" if self.enabled else "local_deterministic"
 
     def analyze(self, agent, context):
         inventory = context.get("inventory", {})
@@ -83,8 +100,11 @@ class LocalModelAdapter:
                 ],
                 "candidate_findings": [],
                 "evidence_notes": [
-                    "Agent analysis was not executed: no local model is configured. "
-                    "Set MAHER_MODEL_URL and MAHER_MODEL_ID to enable model-assisted analysis."
+                    (
+                        "Non-loopback model endpoints are disabled; no external or cloud model request was sent."
+                        if not self.local_endpoint_allowed else
+                        "No local inference model is configured. The deterministic on-device tool coordinator still runs authorized specialist tools."
+                    )
                 ],
                 "next_checks": [agent.get("mission", "")],
                 "tool_requests": [],
