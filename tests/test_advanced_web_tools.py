@@ -56,6 +56,18 @@ class AdvancedWebToolsTests(unittest.TestCase):
         for secret in ("secret-query", "other-secret", "credential-secret", "private-message", "private-cookie", "private-response"):
             self.assertNotIn(secret, serialized)
 
+    def test_surface_routes_hide_url_credentials_and_opaque_path_tokens(self):
+        record = {
+            "url": "https://user:password@example.test/reset/token/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/42",
+            "method": "GET", "source": "burp", "status": 200,
+            "request_raw": "", "response_raw": "",
+        }
+        result = run_advanced_web_tools([record])
+        serialized = json.dumps(result)
+        self.assertNotIn("user:password", serialized)
+        self.assertNotIn("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", serialized)
+        self.assertIn("example.test", serialized)
+
 
 if __name__ == "__main__":
     unittest.main()
