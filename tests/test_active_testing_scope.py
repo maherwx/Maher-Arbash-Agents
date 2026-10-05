@@ -1,9 +1,10 @@
 import tempfile
 import unittest
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from maher_bounty.active_testing import run_active_testing
+from maher_bounty.active_testing import _exec, _tool_coverage, run_active_testing
 
 
 class ActiveTestingScopeTests(unittest.TestCase):
@@ -88,6 +89,19 @@ class ActiveTestingScopeTests(unittest.TestCase):
         self.assertIn("-json", command)
         self.assertNotIn("-san", command)
         self.assertNotIn("-cn", command)
+
+    def test_nuclei_missing_templates_is_reported_as_blocked(self):
+        completed = subprocess.CompletedProcess(["nuclei"], 1, "", "no templates found in path")
+        with patch("maher_bounty.active_testing.shutil.which", return_value="/usr/bin/nuclei"), \\
+             patch("maher_bounty.active_testing.subprocess.run", return_value=completed):
+            result = _exec(["nuclei", "-l", "targets.txt"], timeout=1)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["error_category"], "nuclei_templates_missing")
+
+    def test_tool_coverage_does_not_label_timeout_as_executed(self):
+        with patch("maher_bounty.active_testing.recommend_tools", return_value={"tools": [{"command": "nikto"}]}):
+            coverage = _tool_coverage({}, [{"tool": "nikto", "status": "timeout"}])
+        self.assertEqual(coverage[0]["execution_status"], "timed_out")
 
 
 if __name__ == "__main__":
