@@ -190,6 +190,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 out / "active" / "agent-followups",
                 scope=scope,
                 active_testing=active_testing,
+                tool_plan=inventory.get("tool_plan", {}),
             )
             active_testing["agent_tool_followups"] = followup_summary
             if followup_summary.get("findings"):
