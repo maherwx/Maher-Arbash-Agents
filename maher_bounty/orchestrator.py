@@ -14,7 +14,7 @@ from .persistence import ResearchStore
 from .native_engines import run_native_engines
 from .tool_orchestration import collect_target_inventory
 from .active_testing import run_active_testing, _dedupe
-from .agent_tool_router import run_agent_tool_requests
+from .agent_tool_router import run_agent_tool_requests, build_local_tool_requests
 from .scope_policy import scope_seed_targets
 from .traffic_ingest import ingest_traffic
 from .burp_evidence import build_scoped_traffic_evidence, build_traffic_target_references
@@ -210,20 +210,39 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             store.checkpoint(run_id, f"wave_{wave_index}", current)
 
         followup_summary = {"mode": "not_run", "runs": [], "findings": [], "decisions": []}
-        if active_enabled and model.enabled:
+        local_tool_plan = {"agent_results": [], "request_count": 0, "mode": "not_run"}
+        if active_enabled:
+            known_followup_urls = [
+                *active_testing.get("discovered_in_scope_urls", []),
+                *traffic_target_refs.values(),
+            ]
+            local_tool_plan = build_local_tool_requests(
+                known_followup_urls,
+                scope=scope,
+                active_testing=active_testing,
+                tool_plan=inventory.get("tool_plan", {}),
+            )
             followup_summary = run_agent_tool_requests(
-                results,
-                [
-                    *active_testing.get("discovered_in_scope_urls", []),
-                    *traffic_target_refs.values(),
-                ],
+                [*results, *local_tool_plan["agent_results"]],
+                known_followup_urls,
                 out / "active" / "agent-followups",
                 scope=scope,
                 active_testing=active_testing,
                 tool_plan=inventory.get("tool_plan", {}),
                 target_references=traffic_target_refs,
             )
+            followup_summary["planner_mode"] = (
+                "local_model_plus_deterministic_coordinator" if model.enabled
+                else "local_deterministic_coordinator"
+            )
+            followup_summary["deterministic_plan"] = {
+                key: value for key, value in local_tool_plan.items() if key != "agent_results"
+            }
             active_testing["agent_tool_followups"] = followup_summary
+            (out / "active" / "agent-followups.json").write_text(
+                json.dumps(followup_summary, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            store.checkpoint(run_id, "agent_tool_followups", followup_summary)
             if followup_summary.get("findings"):
                 active_testing["findings"] = _dedupe([
                     *active_testing.get("findings", []),
@@ -233,33 +252,33 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 validation = validate_evidence(normalized)
                 workstreams = build_agent_workstreams(intelligence, validation)
                 write_advanced_artifacts(out / "intelligence", intelligence, validation, workstreams)
-                store.checkpoint(run_id, "agent_tool_followups", followup_summary)
                 store.checkpoint(run_id, "validated_evidence_after_followups", validation)
                 review_ids = {"evidence_reviewer", "false_positive_reviewer", "reproducibility_reviewer"}
                 prior_evidence = evidence_bus(results)
                 followup_reviews = []
-                for reviewer in agents:
-                    if reviewer.get("id") not in review_ids:
-                        continue
-                    review = model.analyze(reviewer, {
-                        "scope": scope, "rules": rules, "inventory": context_inventory,
-                        "architecture_topology": topology, "application_graph": graph,
-                        "application_intelligence": intelligence, "agent_workstreams": workstreams,
-                        "validated_evidence": validation, "native_engine_analysis": native,
-                        "traffic_evidence": traffic_evidence,
-                        "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
-                        "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
-                        "research_directives": directives,
-                        "research_method": {"mode": "followup_evidence_review", "principles": directives["directives"]},
-                    })
-                    results.append(review)
-                    followup_reviews.append(review)
-                    store.add_evidence(run_id, review.get("agent", "unknown"), "followup_review", review)
+                if model.enabled:
+                    for reviewer in agents:
+                        if reviewer.get("id") not in review_ids:
+                            continue
+                        review = model.analyze(reviewer, {
+                            "scope": scope, "rules": rules, "inventory": context_inventory,
+                            "architecture_topology": topology, "application_graph": graph,
+                            "application_intelligence": intelligence, "agent_workstreams": workstreams,
+                            "validated_evidence": validation, "native_engine_analysis": native,
+                            "traffic_evidence": traffic_evidence,
+                            "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
+                            "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
+                            "research_directives": directives,
+                            "research_method": {"mode": "followup_evidence_review", "principles": directives["directives"]},
+                        })
+                        results.append(review)
+                        followup_reviews.append(review)
+                        store.add_evidence(run_id, review.get("agent", "unknown"), "followup_review", review)
                 store.checkpoint(run_id, "followup_reviews", followup_reviews)
         else:
             active_testing["agent_tool_followups"] = {
                 **followup_summary,
-                "reason": "active testing or the local model is not enabled",
+                "reason": "active testing is disabled by the authorized run configuration",
             }
 
         agent_status_counts = Counter(str(row.get("status", "unknown")) for row in results)
@@ -270,6 +289,9 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "successful_model_analyses": sum(1 for row in results if row.get("status") not in {"planned", "model_error"}),
             "planning_only": agent_status_counts.get("planned", 0),
             "model_errors": agent_status_counts.get("model_error", 0),
+            "tool_followup_mode": followup_summary.get("planner_mode", "not_run"),
+            "tool_followup_requests": followup_summary.get("request_count", 0),
+            "tool_followup_runs": len(followup_summary.get("runs", [])),
             "status_counts": dict(agent_status_counts),
         }
 
