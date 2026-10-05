@@ -167,6 +167,17 @@ class BrowserRuntimeTests(unittest.TestCase):
         finally:
             sender.close()
 
+    def test_direct_invalid_later_action_rejected_before_navigation_or_click(self):
+        sender = BrowserTransport({"owner": {"origin": self.origin}}, {"assets": [self.origin]})
+        try:
+            with self.assertRaises(ValueError):
+                sender("owner", {"url": self.origin + "/login", "browser": {"actions": [
+                    {"kind": "click", "selector": "#login"}, {"kind": "unsupported", "selector": "#anything"}]}})
+            self.assertEqual(sender.count, 0)
+            self.assertFalse(self.seen)
+        finally:
+            sender.close()
+
     def test_network_idle_observes_async_state_before_proof(self):
         config = {"engine": "browser", "identities": {"owner": {"origin": self.origin}},
                   "workflows": [{"id": "settle", "identity": "owner", "steps": [
