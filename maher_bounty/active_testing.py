@@ -213,40 +213,84 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
         "rejected_count": len(rejected_urls),
     }]
 
+    seen_origins = set()
+    seen_network_hosts = set()
+    seen_tls_origins = set()
     for scan_target in active_targets:
         parsed = urlparse(scan_target)
-        host = parsed.hostname or ""
-        label = (re.sub(r"[^A-Za-z0-9._-]", "_", parsed.netloc or host) or "target") + "-" + hashlib.sha256(scan_target.encode("utf-8")).hexdigest()[:10]
-        host_dir = root / "hosts" / label
+        host = (parsed.hostname or "").lower()
+        port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+        origin_key = (parsed.scheme.lower(), host, port)
+        host_dir_label = (re.sub(r"[^A-Za-z0-9._-]", "_", parsed.netloc or host) or "target") + "-" + hashlib.sha256(scan_target.encode("utf-8")).hexdigest()[:10]
+        host_dir = root / "hosts" / host_dir_label
         host_dir.mkdir(parents=True, exist_ok=True)
 
-        before_count = len(discovered_urls)
-        katana_out = host_dir / "katana.txt"
-        crawl_run = _exec(["katana", "-u", scan_target, "-silent", "-d", "3", "-jc", "-fs", "fqdn"], timeout=90, output=katana_out)
-        runs.append(crawl_run)
-        if katana_out.exists():
-            crawled = [line.strip() for line in katana_out.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
-            discovered_urls.extend(_in_scope_unique(crawled, scope, target=fallback_target))
-        directory_urls = _directory_discovery(scan_target, host_dir, runs)
-        discovered_urls.extend(_in_scope_unique(directory_urls, scope, target=fallback_target))
-        agent_decisions.append({
-            "stage": "web_discovery",
-            "target": scan_target,
-            "tools": ["katana", "ffuf" if shutil.which("ffuf") else "gobuster"],
-            "crawl_status": crawl_run.get("status"),
-            "new_in_scope_urls": max(0, len(discovered_urls) - before_count),
-            "next": "classify discovered routes and choose validators",
-        })
-        nikto_out = host_dir / "nikto.txt"
-        runs.append(_exec(["nikto", "-h", scan_target, "-nointeractive"], timeout=120, output=nikto_out))
-        findings.extend(_nikto_findings(nikto_out, scan_target))
-        runs.append(_exec(["nmap", "-sV", "-Pn", "--top-ports", "100", host], timeout=120, output=host_dir / "nmap.txt"))
-        runs.append(_exec(["tlsx", "-u", scan_target, "-silent", "-san", "-cn", "-so"], timeout=60, output=host_dir / "tlsx.txt"))
-        if shutil.which("zap-baseline.py"):
-            runs.append(_exec([
-                "zap-baseline.py", "-t", scan_target, "-m", "2", "-T", "30",
-                "-J", str(host_dir / "zap-baseline.json"), "-r", str(host_dir / "zap-baseline.html"),
-            ], timeout=180))
+        if origin_key not in seen_origins:
+            seen_origins.add(origin_key)
+            before_count = len(discovered_urls)
+            katana_out = host_dir / "katana.txt"
+            crawl_run = _exec(["katana", "-u", scan_target, "-silent", "-d", "3", "-jc", "-fs", "fqdn"], timeout=90, output=katana_out)
+            runs.append(crawl_run)
+            if katana_out.exists():
+                crawled = [line.strip() for line in katana_out.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
+                discovered_urls.extend(_in_scope_unique(crawled, scope, target=fallback_target))
+            directory_urls = _directory_discovery(scan_target, host_dir, runs)
+            discovered_urls.extend(_in_scope_unique(directory_urls, scope, target=fallback_target))
+            agent_decisions.append({
+                "stage": "web_discovery",
+                "target": scan_target,
+                "tools": ["katana", "ffuf" if shutil.which("ffuf") else "gobuster"],
+                "crawl_status": crawl_run.get("status"),
+                "new_in_scope_urls": max(0, len(discovered_urls) - before_count),
+                "next": "classify discovered routes and choose validators",
+            })
+            nikto_out = host_dir / "nikto.txt"
+            runs.append(_exec(["nikto", "-h", scan_target, "-nointeractive"], timeout=120, output=nikto_out))
+            if shutil.which("zap-baseline.py"):
+                runs.append(_exec([
+                    "zap-baseline.py", "-t", scan_target, "-m", "2", "-T", "30",
+                    "-J", str(host_dir / "zap-baseline.json"), "-r", str(host_dir / "zap-baseline.html"),
+                ], timeout=180))
+        else:
+            for tool in ("katana", "ffuf/gobuster", "nikto", "zap-baseline.py"):
+                runs.append({
+                    "tool": tool, "status": "skipped", "target": scan_target,
+                    "reason": "already executed for this origin in the current run",
+                })
+            agent_decisions.append({
+                "stage": "deduplication", "target": scan_target,
+                "decision": "reuse existing origin coverage",
+                "reason": "the same scheme, host, and port were already tested in this run",
+            })
+
+        if host not in seen_network_hosts:
+            seen_network_hosts.add(host)
+            runs.append(_exec(
+                ["nmap", "-sV", "-Pn", "--top-ports", "100", host],
+                timeout=120, output=host_dir / "nmap.txt",
+            ))
+        else:
+            runs.append({
+                "tool": "nmap", "status": "skipped", "target": scan_target,
+                "reason": "network host already tested in this run",
+            })
+
+        if parsed.scheme.lower() == "https" and origin_key not in seen_tls_origins:
+            seen_tls_origins.add(origin_key)
+            runs.append(_exec(
+                ["tlsx", "-u", scan_target, "-silent", "-san", "-cn"],
+                timeout=60, output=host_dir / "tlsx.txt",
+            ))
+        elif parsed.scheme.lower() != "https":
+            runs.append({
+                "tool": "tlsx", "status": "skipped", "target": scan_target,
+                "reason": "TLS certificate probing applies to HTTPS targets",
+            })
+        else:
+            runs.append({
+                "tool": "tlsx", "status": "skipped", "target": scan_target,
+                "reason": "TLS host and port already probed in this run",
+            })
 
     discovered_urls = _in_scope_unique(discovered_urls, scope, target=fallback_target)
     target_file = root / "targets.txt"
