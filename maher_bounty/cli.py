@@ -107,7 +107,16 @@ def _main():
     status.add_argument("--backoff", type=float, default=5.0)
 
     s.add_parser("doctor", help="Check local runtimes and research tools")
+    bench = s.add_parser("workflow-benchmark", help="Evaluate access/state detection against generated local fixtures")
+    bench.add_argument("--engine", choices=["http", "browser"], default="http")
+    bench.add_argument("--out", default="results/workflow-benchmark")
     a = p.parse_args()
+
+    if a.cmd == "workflow-benchmark":
+        from .workflow_benchmark import run_workflow_benchmark
+        result = run_workflow_benchmark(a.out, engine=a.engine)
+        print(json.dumps(result, indent=2))
+        return 0 if result["quality_gate_passed"] else 1
 
     if a.cmd == "workflow-run":
         result = execute_workflows(json.loads(Path(a.manifest).read_text(encoding="utf-8")),
