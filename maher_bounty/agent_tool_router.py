@@ -72,7 +72,7 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
         *((tool_plan or {}).get("metadata_runs", []) if isinstance(tool_plan, dict) else []),
     ]
     for run in run_rows:
-        if not isinstance(run, dict) or run.get("status") in {"missing", "skipped"}:
+        if not isinstance(run, dict) or run.get("status") != "ok":
             continue
         tool = str(run.get("tool") or "").strip().lower()
         if tool not in covered:
@@ -125,6 +125,104 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
             if target in known or _origin(target):
                 covered[tool].add(_coverage_key(tool, target))
     return covered
+
+
+def build_local_tool_requests(
+    known_urls: list[str],
+    *,
+    scope: dict,
+    active_testing: dict | None = None,
+    tool_plan: dict | None = None,
+) -> dict:
+    """Build a no-model local follow-up plan from evidence and actual coverage.
+
+    This lets the coordinator keep running specialist tools when no local
+    inference runtime is configured. It only chooses allowlisted binaries and
+    exact in-scope URLs already present in inventory or captured traffic.
+    """
+    allowed, rejected = filter_in_scope_urls(known_urls, scope)
+    known = set(allowed)
+    covered = _prior_coverage(active_testing or {}, known, tool_plan)
+    origin_urls = []
+    seen_origins = set()
+    for url in allowed:
+        origin = _origin(url)
+        if origin and origin not in seen_origins:
+            seen_origins.add(origin)
+            origin_urls.append(url)
+
+    candidates_by_tool = {
+        "nuclei": allowed,
+        "dalfox": [url for url in allowed if urlparse(url).query],
+        "katana": origin_urls,
+        "hakrawler": allowed,
+        "zap-baseline.py": origin_urls,
+        "naabu": origin_urls,
+        "dnsx": origin_urls,
+        "alterx": origin_urls,
+        "nmap": origin_urls,
+        "tlsx": [url for url in origin_urls if urlparse(url).scheme.lower() == "https"],
+        "whatweb": origin_urls,
+        "wafw00f": origin_urls,
+        "nikto": origin_urls,
+        "httpx": origin_urls,
+        "subfinder": origin_urls,
+        "assetfinder": origin_urls,
+        "waybackurls": origin_urls,
+        "gau": origin_urls,
+    }
+    # Choose one content-discovery engine to avoid duplicate wordlist traffic.
+    dir_tool = "ffuf" if shutil.which("ffuf") else "gobuster"
+    candidates_by_tool[dir_tool] = [
+        url for url in origin_urls
+        if urlparse(url).path in {"", "/"} and not urlparse(url).query
+    ]
+
+    requests = []
+    selected_targets = set()
+    for tool in (
+        "nuclei", "dalfox", "katana", "hakrawler", "zap-baseline.py",
+        "naabu", "dnsx", "alterx", "tlsx", "ffuf", "gobuster",
+        "whatweb", "wafw00f", "nikto", "nmap", "httpx",
+        "subfinder", "assetfinder", "waybackurls", "gau",
+    ):
+        if tool not in candidates_by_tool or len(requests) >= MAX_AGENT_REQUESTS:
+            continue
+        eligible = []
+        seen_keys = set()
+        for url in candidates_by_tool[tool]:
+            key = _coverage_key(tool, url)
+            if not key or key in covered[tool] or key in seen_keys:
+                continue
+            if tool == "dalfox" and not urlparse(url).query:
+                continue
+            if tool == "tlsx" and urlparse(url).scheme.lower() != "https":
+                continue
+            if tool in {"ffuf", "gobuster"} and urlparse(url).path not in {"", "/"}:
+                continue
+            seen_keys.add(key)
+            eligible.append(url)
+            if len(eligible) >= min(MAX_AGENT_TARGETS, 8):
+                break
+        if eligible:
+            requests.append({
+                "agent": "local_deterministic_coordinator",
+                "tool_requests": [{
+                    "tool": tool,
+                    "targets": eligible,
+                    "reason": "local evidence-driven coverage gap; no repeated successful base coverage",
+                }],
+            })
+            selected_targets.update(eligible)
+    return {
+        "agent_results": requests,
+        "request_count": len(requests),
+        "known_in_scope_url_count": len(known),
+        "rejected_inventory_url_count": len(rejected),
+        "covered_tool_count": sum(bool(value) for value in covered.values()),
+        "mode": "local_deterministic_evidence_coordinator",
+    }
+
 
 def run_agent_tool_requests(
     agent_results: list[dict],
