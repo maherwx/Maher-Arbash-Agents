@@ -72,7 +72,7 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
         *((tool_plan or {}).get("metadata_runs", []) if isinstance(tool_plan, dict) else []),
     ]
     for run in run_rows:
-        if not isinstance(run, dict) or run.get("status") != "ok":
+        if not isinstance(run, dict) or run.get("status") not in {"ok", "nonzero"}:
             continue
         tool = str(run.get("tool") or "").strip().lower()
         if tool not in covered:
