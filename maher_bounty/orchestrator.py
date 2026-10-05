@@ -120,6 +120,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
     if workflow_manifest_path:
         workflow_manifest = json.loads(Path(workflow_manifest_path).read_text(encoding="utf-8"))
         validate_manifest(workflow_manifest, scope)
+    imported_traffic = ingest_traffic(traffic_path, kind="auto") if traffic_path else None
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     store = ResearchStore()
@@ -138,7 +139,6 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "advanced_analysis": {},
         }
         if traffic_path:
-            imported_traffic = ingest_traffic(traffic_path, kind="auto")
             traffic_evidence = build_scoped_traffic_evidence(imported_traffic, scope)
             traffic_target_refs = build_traffic_target_references(imported_traffic, scope)
             allowed_traffic_urls = set(traffic_target_refs.values())
