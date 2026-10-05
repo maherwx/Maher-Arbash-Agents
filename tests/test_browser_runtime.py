@@ -3,12 +3,14 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
 from maher_bounty.workflow_execution import execute_workflows
+from maher_bounty.browser_runtime import BrowserTransport
 
 
 @unittest.skipUnless(os.environ.get("MAHER_BROWSER_TESTS") == "1", "opt-in real Chromium fixture suite")
@@ -21,6 +23,9 @@ class BrowserRuntimeTests(unittest.TestCase):
                 pass
             def do_GET(self):
                 seen.append((self.path, self.headers.get("Cookie")))
+                if self.path.split("?")[0] == "/broken":
+                    self.connection.close()
+                    return
                 if self.path == "/external-redirect":
                     self.send_response(302)
                     self.send_header("Location", "http://localhost:" + str(self.server.server_port) + "/credential-leak")
@@ -36,7 +41,10 @@ class BrowserRuntimeTests(unittest.TestCase):
                 if self.path == "/rotate":
                     self.send_header("Set-Cookie", "session=rotated; Path=/")
                 self.end_headers()
-                if self.path == "/login":
+                if self.path in {"/degraded", "/blocked-dependency"}:
+                    dependency = "/broken?token=secret-fixture" if self.path == "/degraded" else "http://localhost:" + str(self.server.server_port) + "/outside"
+                    text = "<div>private-order-42</div><script>fetch('" + dependency + "').catch(()=>{}).finally(()=>document.body.insertAdjacentHTML('beforeend','<div id=done>done</div>'))</script>"
+                elif self.path == "/login":
                     text = "<input name='user'><button id='login'>login</button><script>document.querySelector('#login').onclick=()=>{document.cookie='session='+document.querySelector('input').value+'; path=/'; document.body.innerHTML='<div id=ready>logged in</div><input id=csrf value=token-fixture>';}</script>"
                 elif self.path.split("?")[0] == "/check":
                     text = "<div id=state>" + ("authenticated" if self.headers.get("Cookie") in {"session=owner", "session=rotated"} else "anonymous") + "</div>"
@@ -71,6 +79,36 @@ class BrowserRuntimeTests(unittest.TestCase):
         self.assertEqual(len(result["findings"]), 1)
         self.assertTrue(result["findings"][0]["validated"])
         self.assertGreaterEqual(result["transport"]["network_requests"], 4)
+
+    def test_failed_dependency_cannot_confirm_rendered_resource_proof(self):
+        self.check_incomplete_dependency("/degraded", "failed_requests")
+
+    def test_blocked_dependency_cannot_confirm_rendered_resource_proof(self):
+        self.check_incomplete_dependency("/blocked-dependency", "blocked_requests")
+
+    def check_incomplete_dependency(self, path, counter):
+        config = {"engine": "browser", "identities": {name: {"origin": self.origin} for name in ["owner", "other"]},
+                  "access_cases": [{"id": "degraded", "request": {"url": self.origin + path, "browser": {"wait_for": "#done"}},
+                                    "allowed": ["owner"], "denied": ["other"], "proof": {"contains": ["private-order-42"]}}]}
+        result = self.execute(config)
+        self.assertEqual(result["status"], "partial")
+        self.assertFalse(result["findings"])
+        self.assertTrue(result["observations"][0]["observations"][0]["network_incomplete"])
+        self.assertGreater(result["transport"][counter], 0)
+        self.assertNotIn("secret-fixture", json.dumps(result))
+
+    def test_direct_headers_and_expired_budget_fail_before_network(self):
+        sender = BrowserTransport({"owner": {"origin": self.origin}}, {"assets": [self.origin]})
+        try:
+            with self.assertRaises(ValueError):
+                sender("owner", {"url": self.origin + "/check", "headers": {"Cookie": "override"}})
+            sender.deadline = time.monotonic() - 1
+            with self.assertRaises(RuntimeError):
+                sender("owner", {"url": self.origin + "/check"})
+            self.assertEqual(sender.count, 0)
+            self.assertEqual(self.seen, [])
+        finally:
+            sender.close()
 
     def test_form_login_cookie_isolation_and_dom_capture(self):
         config = {"engine": "browser", "identities": {name: {"origin": self.origin} for name in ["owner", "other"]},

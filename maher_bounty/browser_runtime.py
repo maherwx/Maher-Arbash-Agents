@@ -21,7 +21,7 @@ class BrowserTransport:
         self.timeout, self.budget, self.interval = timeout, budget, interval
         self.deadline = time.monotonic() + total_seconds
         self.last = 0
-        self.count, self.blocked = 0, 0
+        self.count, self.blocked, self.failed = 0, 0, 0
         self.transactions = []
         self.contexts, self.pages = {}, {}
         self._pw = sync_playwright().start()
@@ -44,11 +44,23 @@ class BrowserTransport:
             route.abort()
             return
         time.sleep(max(0, self.interval - (time.monotonic() - self.last)))
+        if time.monotonic() >= self.deadline:
+            self.blocked += 1
+            route.abort()
+            return
         self.count += 1
         self.last = time.monotonic()
         # Fetch one hop only: browser redirect interception can otherwise
         # inherit credential headers across the redirect chain.
-        response = route.fetch(max_redirects=0, timeout=self.timeout * 1000)
+        try:
+            response = route.fetch(max_redirects=0, timeout=min(self.timeout, max(0.001, self.deadline - time.monotonic())) * 1000)
+        except self.error_type:
+            self.failed += 1
+            self.transactions.append({"identity": name, "url": _safe_url(request.url),
+                                      "method": request.method, "resource_type": request.resource_type,
+                                      "status": None, "error_type": "network_error"})
+            route.abort()
+            return
         self.transactions.append({"identity": name, "url": _safe_url(request.url),
                                   "method": request.method, "resource_type": request.resource_type,
                                   "status": response.status})
@@ -98,7 +110,14 @@ class BrowserTransport:
             raise ValueError("browser request outside identity origin/scope")
         if spec.get("method", "GET").upper() != "GET" or "body" in spec:
             raise ValueError("browser transport navigates GET pages; use form actions for mutations")
+        if any(k.lower() in {"authorization", "cookie", "host", "proxy-authorization"} for k in spec.get("headers", {})):
+            raise ValueError("request headers cannot override identity credentials")
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0 or self.count >= self.budget:
+            raise RuntimeError("browser network budget exhausted")
+        incomplete_before = self.blocked + self.failed
         page = self.pages[name]
+        page.set_default_timeout(min(self.timeout, remaining) * 1000)
         page.set_extra_http_headers(spec.get("headers", {}))
         settings = spec.get("browser", {})
         main_responses = []
@@ -139,6 +158,7 @@ class BrowserTransport:
             final = main_responses[-1] if main_responses else response
             return {"status": final.status if final else 0, "body": body[:1048576],
                     "headers": {}, "truncated": len(body) > 1048576, "captured": captures,
+                    "network_incomplete": self.blocked + self.failed > incomplete_before,
                     "browser_derived": True}
         except self.error_type:
             raise RuntimeError("browser operation failed or timed out") from None
@@ -147,6 +167,7 @@ class BrowserTransport:
 
     def summary(self):
         return {"engine": "browser", "network_requests": self.count, "blocked_requests": self.blocked,
+                "failed_requests": self.failed,
                 "transactions": self.transactions}
 
     def close(self):

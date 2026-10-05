@@ -55,6 +55,17 @@ or automatic login discovery; supplied application-specific selectors determine
 the tested flows. Browser evidence stores hashes and assertions, not credentials,
 DOM token values or raw HTML. Browser summaries separately report actual network
 requests, including subresources, and blocked requests.
+Failed intercepted requests are counted separately and retain a generic
+`network_error` marker, with query values redacted and exception text omitted.
+If a step observes blocked or failed network traffic, its DOM evidence records
+`network_incomplete`: the access case or workflow becomes inconclusive and
+cannot confirm a finding or continue capturing state. This conservative rule
+also covers blocked external dependencies, even when the visible text matches
+the expected resource marker. A successful DOM assertion alone does not prove
+the page finished its required network operations; use explicit wait selectors
+appropriate to the application. Late activity after observation is not covered.
+Direct browser calls reject credential-header overrides and exhausted budgets.
+After rate-limit delays the deadline is checked again before fetching traffic.
 The summary also retains a sanitized network timeline: identity, HTTP method,
 resource type, status and URL with query values redacted. This exposes endpoints
 reached through JavaScript and forms to the research context without replaying
