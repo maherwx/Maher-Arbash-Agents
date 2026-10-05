@@ -36,9 +36,16 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
         if output:
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(combined, encoding="utf-8", errors="ignore")
-        status = "ok" if cp.returncode == 0 else "nonzero"
         stderr_tail = _tail(cp.stderr)
         stdout_tail = _tail(cp.stdout, 1000)
+        status = "ok" if cp.returncode == 0 else "nonzero"
+        error_category = None
+        diagnostic_text = (cp.stderr or "").lower()
+        if tool == "nuclei" and cp.returncode != 0 and any(
+            marker in diagnostic_text for marker in ("no templates found", "could not find template")
+        ):
+            status = "blocked"
+            error_category = "nuclei_templates_missing"
         print(f"[ACTIVE] {tool:<12} {status.upper()}", flush=True)
         if status != "ok" and (stderr_tail or stdout_tail):
             diagnostic = (stderr_tail or stdout_tail).replace("\n", " ")[:400]
@@ -46,6 +53,7 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
         return {
             "tool": tool, "status": status, "returncode": cp.returncode, "command": cmd, "timeout_seconds": effective_timeout,
             "output": str(output) if output else None, "stderr_tail": stderr_tail, "stdout_tail": stdout_tail,
+            **({"error_category": error_category} if error_category else {}),
         }
     except subprocess.TimeoutExpired as exc:
         partial = _tail(exc.stdout)
@@ -128,8 +136,26 @@ def _tool_coverage(inventory: dict, runs: list[dict]) -> list[dict]:
         item = dict(recommendation)
         command = item.get("command")
         if command and command in statuses:
-            item["run_statuses"] = statuses[command]
-            item["execution_status"] = "skipped" if all(status == "skipped" for status in statuses[command]) else "executed"
+            observed = statuses[command]
+            item["run_statuses"] = observed
+            attempted = [status for status in observed if status != "skipped"]
+            if not attempted:
+                item["execution_status"] = "skipped"
+            elif all(status == "ok" for status in attempted):
+                item["execution_status"] = "executed"
+            elif "blocked" in attempted:
+                item["execution_status"] = "blocked"
+                item["reason"] = "tool execution was blocked by a local prerequisite; inspect run diagnostics"
+            elif "timeout" in attempted:
+                item["execution_status"] = "timed_out"
+                item["reason"] = "tool did not finish within its configured process budget"
+            elif "nonzero" in attempted:
+                item["execution_status"] = "failed"
+                item["reason"] = "tool returned a nonzero exit status; inspect run diagnostics"
+            elif "missing" in attempted:
+                item["execution_status"] = "not_installed"
+            else:
+                item["execution_status"] = "attempted_with_errors"
         elif item.get("mode") in {"manual_proxy_report_import", "static"}:
             item["execution_status"] = "requires_input"
             item["reason"] = "manual traffic/report or source repository is required"
@@ -140,8 +166,6 @@ def _tool_coverage(inventory: dict, runs: list[dict]) -> list[dict]:
             item["reason"] = "not yet wired into the active web workflow"
         coverage.append(item)
     return coverage
-
-
 def _in_scope_unique(values, scope: dict, *, target: str | None = None) -> list[str]:
     allowed, _ = filter_in_scope_urls(values, scope, target=target)
     return allowed
