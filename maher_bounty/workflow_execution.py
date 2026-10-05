@@ -146,7 +146,10 @@ def validate_manifest(manifest, scope):
             if not step.get("expect"):
                 raise ValueError("every workflow step requires expected behavior")
             _validate_expectation(step["expect"])
-            requests.append((step.get("request", {}), workflow["identity"]))
+            name = step.get("identity", workflow["identity"])
+            if name not in identities:
+                raise ValueError("workflow step requires a known identity")
+            requests.append((step.get("request", {}), name))
     for request, name in requests:
         url = request.get("url", "")
         if not is_in_scope_url(url, scope) or urlparse(url).fragment:
@@ -313,12 +316,16 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
 
     for workflow in manifest.get("workflows", []):
         rows = []
-        name = workflow["identity"]
         variables = dict(workflow.get("variables", {}))
-        if hasattr(sender, "reset"):
-            sender.reset(name)
         try:
+            # Reset each participating session once, preserving it when switching
+            # back to that identity later in the same application lifecycle.
+            if hasattr(sender, "reset"):
+                participants = dict.fromkeys(step.get("identity", workflow["identity"]) for step in workflow["steps"])
+                for name in participants:
+                    sender.reset(name)
             for index, step in enumerate(workflow["steps"]):
+                name = step.get("identity", workflow["identity"])
                 request = _resolve(step["request"], variables)
                 if (not is_in_scope_url(request["url"], scope)
                         or _origin(request["url"]) != _origin(manifest["identities"][name]["origin"])):
@@ -327,7 +334,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                 _validate_expectation(expected)
                 response = send(name, request)
                 checks = _assertions(response, expected)
-                rows.append({"step": index, **_observation(response, checks)})
+                rows.append({"step": index, "identity": name, **_observation(response, checks)})
                 if response.get("truncated") or not checks:
                     raise RuntimeError("incomplete workflow evidence")
                 if not all(c["passed"] for c in checks):
