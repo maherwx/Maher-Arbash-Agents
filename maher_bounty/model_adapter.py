@@ -16,6 +16,7 @@ _AGENT_CONTEXT_FIELDS = (
     "native_engine_analysis",
     "active_testing",
     "active_findings",
+    "traffic_evidence",
     "hypotheses",
     "prior_agent_evidence",
     "research_directives",
