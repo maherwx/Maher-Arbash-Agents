@@ -7,6 +7,7 @@ from pathlib import Path
 from .source_languages import language_for, generic_candidates
 from .source_semgrep import review_semgrep
 from .source_map import build_source_map
+from .artifact_io import write_json_atomic
 
 
 EXCLUDED = {".git", ".venv", "venv", "node_modules", "vendor", "__pycache__", "build", "dist"}
@@ -220,7 +221,14 @@ def review_source(source_dir, out_dir):
                               "generic text checks work across text languages but do not prove dataflow",
                               "parser coverage depends on configured local rules and installed CE support",
                               "binary files and unsupported encodings are not reviewed; no server-source download"]}
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "source-review.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    (output / "source-structure.json").write_text(json.dumps(structure, ensure_ascii=False, indent=2), encoding="utf-8")
+    # The primary report embeds its structure and is replaced last. Readers of
+    # both artifacts must compare generation IDs, since two replaces are not
+    # a cross-file transaction and concurrent writers can interleave them.
+    encoded = json.dumps(report, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8")
+    generation = hashlib.sha256(encoded).hexdigest()
+    report["artifact_generation"] = generation
+    structure["artifact_generation"] = generation
+    write_json_atomic(output / "source-structure.json", structure)
+    write_json_atomic(output / "source-review.json", report)
     return report

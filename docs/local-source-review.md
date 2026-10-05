@@ -89,6 +89,18 @@ Route prefixes, wrappers, dynamic imports and runtime registrations may be misse
 The map is not a complete call graph or dependency-vulnerability analysis and
 does not expand network scope or automatically schedule checks against a route.
 Model roles receive this structure only when their configured local model runs.
+
+Source artifacts are written through bounded atomic JSON replacement, using a
+private temporary file where supported, flushing before replacement. The previous
+artifact survives a serialization/size/write failure before replacement; a reader
+does not receive a half-written JSON file. Each artifact is limited to 8 MiB and
+non-finite numeric values are rejected. Both artifacts share `artifact_generation`,
+derived from the complete report content before generation fields are added.
+The main report embeds the full structure and is written last; use it as the
+authoritative snapshot. Consumers combining the separate files must compare
+generation IDs and reject mismatches. Two file replacements are not one transaction;
+interruption or concurrent writers can leave mismatched generations. File flushing
+does not promise recovery from every power loss or filesystem failure.
 Source evidence does not expand the network authorization scope. No source review,
 tests, experiments, model execution or target scan was run for this code change;
 it was reviewed statically only and remains unverified at runtime.
