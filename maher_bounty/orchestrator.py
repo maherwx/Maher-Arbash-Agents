@@ -184,30 +184,37 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         model = LocalModelAdapter()
         agents = load_agents()
         waves = build_waves(agents)
-        print(f"[agents] Starting {len(agents)} specialist roles in {len(waves)} collaboration waves; mode={model.mode}", flush=True)
         results = []
         wave_summary = []
-        for wave_index, wave in enumerate(waves, start=1):
-            print(f"[agents] Wave {wave_index}/{len(waves)}: {len(wave)} agents", flush=True)
-            prior_evidence = evidence_bus(results)
-            current = []
-            for agent in wave:
-                result = model.analyze(agent, {
-                    "scope": scope, "rules": rules, "inventory": context_inventory,
-                    "architecture_topology": topology, "application_graph": graph,
-                    "application_intelligence": intelligence, "agent_workstreams": workstreams,
-                    "validated_evidence": validation, "native_engine_analysis": native,
-                    "traffic_evidence": traffic_evidence,
-                    "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
-                    "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
-                    "research_directives": directives,
-                    "research_method": {"mode": "collaborative_evidence_driven", "wave": wave_index, "principles": directives["directives"]},
-                })
-                current.append(result)
-                store.add_evidence(run_id, result.get("agent", "unknown"), "agent_result", result)
-            results.extend(current)
-            wave_summary.append({"wave": wave_index, "agents": [r.get("agent") for r in current], "shared_evidence_packets_after_wave": len(evidence_bus(results))})
-            store.checkpoint(run_id, f"wave_{wave_index}", current)
+        if model.enabled:
+            print(f"[agents] Running {len(agents)} specialist roles in {len(waves)} collaboration waves; mode={model.mode}", flush=True)
+            for wave_index, wave in enumerate(waves, start=1):
+                print(f"[agents] Wave {wave_index}/{len(waves)}: {len(wave)} agents", flush=True)
+                prior_evidence = evidence_bus(results)
+                current = []
+                for agent in wave:
+                    result = model.analyze(agent, {
+                        "scope": scope, "rules": rules, "inventory": context_inventory,
+                        "architecture_topology": topology, "application_graph": graph,
+                        "application_intelligence": intelligence, "agent_workstreams": workstreams,
+                        "validated_evidence": validation, "native_engine_analysis": native,
+                        "traffic_evidence": traffic_evidence,
+                        "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
+                        "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
+                        "research_directives": directives,
+                        "research_method": {"mode": "collaborative_evidence_driven", "wave": wave_index, "principles": directives["directives"]},
+                    })
+                    current.append(result)
+                    store.add_evidence(run_id, result.get("agent", "unknown"), "agent_result", result)
+                results.extend(current)
+                wave_summary.append({"wave": wave_index, "agents": [r.get("agent") for r in current], "shared_evidence_packets_after_wave": len(evidence_bus(results))})
+                store.checkpoint(run_id, f"wave_{wave_index}", current)
+        else:
+            print(
+                f"[agents] Local model unavailable; skipped {len(agents)} LLM analyses. "
+                "The deterministic local tool coordinator remains available.",
+                flush=True,
+            )
 
         followup_summary = {"mode": "not_run", "runs": [], "findings": [], "decisions": []}
         local_tool_plan = {"agent_results": [], "request_count": 0, "mode": "not_run"}
@@ -288,6 +295,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "analysis_calls": len(results),
             "successful_model_analyses": sum(1 for row in results if row.get("status") not in {"planned", "model_error"}),
             "planning_only": agent_status_counts.get("planned", 0),
+            "roles_skipped_without_local_model": len(agents) if not model.enabled else 0,
             "model_errors": agent_status_counts.get("model_error", 0),
             "tool_followup_mode": followup_summary.get("planner_mode", "not_run"),
             "tool_followup_requests": followup_summary.get("request_count", 0),
