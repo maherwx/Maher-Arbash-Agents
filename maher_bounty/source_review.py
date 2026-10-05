@@ -8,6 +8,9 @@ from .source_languages import language_for, generic_candidates
 from .source_semgrep import review_semgrep
 from .source_map import build_source_map
 from .artifact_io import write_json_atomic
+from .source_baseline import compare_source_baseline, SOURCE_ANALYSIS_REVISION
+from .source_languages import CHECKS
+from .source_semgrep import PATTERNS
 
 
 EXCLUDED = {".git", ".venv", "venv", "node_modules", "vendor", "__pycache__", "build", "dist"}
@@ -211,6 +214,10 @@ def review_source(source_dir, out_dir):
     structure = build_source_map(snapshots, files, findings)
     status = "partial" if skipped or truncated or gaps or structure["truncated"] or structure["errors"] or engine["status"] not in {"ok", "not_applicable"} else "completed" if files else "no_supported_source"
     report = {"mode": "local_static_source_review", "status": status,
+              "source_root_sha256": hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
+              "analysis_revision": SOURCE_ANALYSIS_REVISION,
+              "rules_sha256": hashlib.sha256(json.dumps({"generic": CHECKS, "semgrep": PATTERNS},
+                                          sort_keys=True, allow_nan=False).encode("utf-8")).hexdigest(),
               "languages": sorted(coverage), "language_coverage": coverage, "parser_coverage_gaps": gaps,
               "engines": [engine], "files": files, "findings": findings,
               "source_structure": structure,
@@ -221,6 +228,7 @@ def review_source(source_dir, out_dir):
                               "generic text checks work across text languages but do not prove dataflow",
                               "parser coverage depends on configured local rules and installed CE support",
                               "binary files and unsupported encodings are not reviewed; no server-source download"]}
+    report["baseline_comparison"] = compare_source_baseline(report, output / "source-review.json")
     # The primary report embeds its structure and is replaced last. Readers of
     # both artifacts must compare generation IDs, since two replaces are not
     # a cross-file transaction and concurrent writers can interleave them.
