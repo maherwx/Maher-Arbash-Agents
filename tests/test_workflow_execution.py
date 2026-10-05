@@ -45,6 +45,38 @@ class WorkflowExecutionTests(unittest.TestCase):
                     "body": '{"id":42,"owner":"owner"}' if name == "owner" else "denied", "headers": {}}
         self.assertFalse(self.run_case(sender=sender)["findings"])
 
+    def test_access_finding_redacts_query_values_without_changing_requests(self):
+        config = manifest()
+        url = config["identities"]["owner"]["origin"] + "/orders/42?token=secret-value&token=second-secret&empty="
+        config["access_cases"][0]["request"]["url"] = url
+        sent = []
+        def sender(name, request):
+            sent.append(request["url"])
+            return {"status": 200, "body": '{"id":42,"owner":"owner"}', "headers": {}}
+        result = self.run_case(config, sender)
+        self.assertEqual(sent, [url] * 6)
+        self.assertEqual(len(result["findings"]), 2)
+        for secret in ["secret-value", "second-secret"]:
+            self.assertNotIn(secret, json.dumps(result))
+        self.assertIn("token=%5Bredacted%5D&token=%5Bredacted%5D&empty=%5Bredacted%5D", result["findings"][0]["target"])
+
+    def test_failed_workflow_redacts_static_query_and_capture_template(self):
+        config = manifest()
+        config["access_cases"] = []
+        config["workflows"] = [{"id": "state", "identity": "owner", "variables": {"token": "captured-secret"}, "steps": [
+            {"request": {"url": config["identities"]["owner"]["origin"] + "/state?fixed=static-secret&token={{token}}"},
+             "expect": {"statuses": [403]}}]}]
+        sent = []
+        def sender(name, request):
+            sent.append(request["url"])
+            return {"status": 200, "body": "{}", "headers": {}}
+        result = self.run_case(config, sender)
+        self.assertIn("captured-secret", sent[0])
+        self.assertEqual(result["decisions"][0]["status"], "invariant_failed")
+        self.assertFalse(result["findings"][0]["validated"])
+        for secret in ["static-secret", "captured-secret", "{{token}}"]:
+            self.assertNotIn(secret, json.dumps(result))
+
     def test_login_html_and_success_status_are_not_resource_proof(self):
         def sender(name, request):
             return {"status": 200, "body": '{"id":42,"owner":"owner"}' if name == "owner" else "<html>Login</html>", "headers": {}}
