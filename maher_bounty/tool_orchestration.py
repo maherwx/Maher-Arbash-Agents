@@ -56,7 +56,7 @@ def _run(cmd: list[str], *, stdout_path: Path | None = None, timeout: int = 30) 
             with stdout_path.open("w", encoding="utf-8") as fh:
                 cp = subprocess.run(cmd, stdout=fh, stderr=subprocess.PIPE, text=True, timeout=effective_timeout, check=False)
         else:
-            cp = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+            cp = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, check=False)
         status = "ok" if cp.returncode == 0 else "nonzero"
         print(f"[tool] {executable} {status}", flush=True)
         return {"tool": executable, "status": status, "returncode": cp.returncode, "stderr": (cp.stderr or "")[-2000:], "command": cmd, "timeout_seconds": effective_timeout}
