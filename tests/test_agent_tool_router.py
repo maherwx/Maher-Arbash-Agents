@@ -54,8 +54,11 @@ class AgentToolRouterTests(unittest.TestCase):
         resolved = "api.app.example.test"
         discovered = "https://api.app.example.test/"
 
+        dnsx_inputs = []
         def fake_exec(command, **kwargs):
             output = kwargs.get("output")
+            if command[0] == "dnsx":
+                dnsx_inputs.append(kwargs.get("input_text"))
             if command[0] == "alterx":
                 output.write_text(resolved + "\\napi.outside.test\\n", encoding="utf-8")
             elif command[0] == "dnsx":
@@ -76,7 +79,7 @@ class AgentToolRouterTests(unittest.TestCase):
             )
         commands = [call.args[0] for call in execute.call_args_list]
         self.assertEqual([command[0] for command in commands], ["alterx", "dnsx", "httpx", "nuclei"])
-        self.assertIn("api.outside.test", str(summary["runs"][0].get("output", "")))
+        self.assertEqual(dnsx_inputs, [resolved + "\\n"])
         self.assertEqual(summary["new_in_scope_urls"], [discovered])
 
     def test_reuses_passive_subfinder_coverage_from_inventory(self):
