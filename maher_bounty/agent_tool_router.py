@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .active_testing import _dalfox_findings, _exec, _nuclei_findings
+from .active_testing import _dalfox_findings, _directory_discovery, _exec, _nuclei_findings
 from .scope_policy import filter_in_scope_urls
 
 
@@ -13,7 +13,7 @@ from .scope_policy import filter_in_scope_urls
 # executable paths, arbitrary flags, payloads, or new target hosts.
 SUPPORTED_AGENT_TOOLS = {
     "hakrawler", "katana", "httpx", "nuclei", "dalfox", "zap-baseline.py",
-    "nikto", "nmap", "tlsx", "whatweb", "wafw00f",
+    "nikto", "nmap", "tlsx", "whatweb", "wafw00f", "dnsx", "naabu", "ffuf", "gobuster",
 }
 MAX_AGENT_REQUESTS = 8
 MAX_AGENT_TARGETS = 30
@@ -21,8 +21,8 @@ MAX_HAKRAWLER_ORIGINS = 2
 MAX_ZAP_ORIGINS = 2
 MAX_FOLLOWUP_ORIGINS = 2
 
-ORIGIN_TOOLS = {"hakrawler", "katana", "nikto", "zap-baseline.py", "whatweb", "wafw00f", "tlsx"}
-HOST_TOOLS = {"nmap"}
+ORIGIN_TOOLS = {"hakrawler", "katana", "nikto", "zap-baseline.py", "whatweb", "wafw00f", "tlsx", "ffuf", "gobuster"}
+HOST_TOOLS = {"nmap", "naabu", "dnsx"}
 
 
 def _coverage_key(tool: str, url: str) -> str:
@@ -86,8 +86,15 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
                     targets.update(Path(command[2]).read_text(encoding="utf-8", errors="ignore").splitlines())
                 except OSError:
                     pass
-        elif tool == "nmap":
+        elif tool in {"nmap", "naabu", "dnsx"}:
             host = run.get("target")
+            if not host:
+                for flag in ("-host", "-d"):
+                    try:
+                        host = command[command.index(flag) + 1]
+                        break
+                    except (ValueError, IndexError):
+                        pass
             if not host and command:
                 host = command[-1]
             if host:
@@ -96,7 +103,7 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
         else:
             target = run.get("target") or run.get("url")
             if not target:
-                for flag in ("-u", "-h", "-t"):
+                for flag in ("-u", "-h", "-t", "-d"):
                     try:
                         target = command[command.index(flag) + 1]
                         break
@@ -205,7 +212,7 @@ def run_agent_tool_requests(
 
     # Agents can request deeper, complementary passes from the installed local
     # web toolkit. Each command is selected from fixed argv templates.
-    for tool in ("httpx", "katana", "whatweb", "wafw00f", "nikto", "nmap", "tlsx"):
+    for tool in ("httpx", "katana", "whatweb", "wafw00f", "nikto", "nmap", "tlsx", "dnsx", "naabu"):
         targets = []
         seen_keys = set()
         for url in selected[tool]:
@@ -220,7 +227,7 @@ def run_agent_tool_requests(
                 runs.append({"tool": tool, "status": "missing", "reason": "agent-requested HTTP probe; binary not installed"})
                 continue
             target_file = root / "httpx-followup-targets.txt"
-            target_file.write_text("\\n".join(targets) + "\\n", encoding="utf-8")
+            target_file.write_text("\n".join(targets) + "\n", encoding="utf-8")
             result = _exec([tool, "-l", str(target_file), "-json", "-silent", "-rate-limit", "3"], timeout=180)
             result["target_count"] = len(targets)
             runs.append(result)
@@ -229,7 +236,16 @@ def run_agent_tool_requests(
             if not shutil.which(tool):
                 runs.append({"tool": tool, "status": "missing", "target": scan_url, "reason": "agent-requested tool; binary not installed"})
                 continue
-            if tool == "katana":
+            if tool == "dnsx":
+                command = [tool, "-silent", "-a", "-resp"]
+                result = _exec(command, timeout=180, input_text=(urlparse(scan_url).hostname or "") + "\n")
+                result["target"] = scan_url
+                runs.append(result)
+                continue
+            elif tool == "naabu":
+                hostname = (urlparse(scan_url).hostname or "").lower()
+                command = [tool, "-host", hostname, "-top-ports", "100", "-rate", "10", "-silent"]
+            elif tool == "katana":
                 command = [tool, "-u", scan_url, "-silent", "-d", "3", "-jc", "-fs", "fqdn"]
             elif tool == "whatweb":
                 command = [tool, "-a", "1", "--no-errors", scan_url]
@@ -245,6 +261,21 @@ def run_agent_tool_requests(
             result = _exec(command, timeout=300)
             result["target"] = scan_url
             runs.append(result)
+    for tool in ("ffuf", "gobuster"):
+        for index, scan_url in enumerate(selected[tool][:MAX_FOLLOWUP_ORIGINS], start=1):
+            if not shutil.which(tool):
+                runs.append({"tool": tool, "status": "missing", "target": scan_url, "reason": "agent-requested directory tool; binary not installed"})
+                continue
+            content_runs = []
+            new_urls = _directory_discovery(
+                scan_url, root / f"{tool}-{index}", content_runs, preferred_tool=tool
+            )
+            for run in content_runs:
+                run["target"] = scan_url
+                runs.append(run)
+            filtered, _ = filter_in_scope_urls(new_urls, scope)
+            new_crawl_urls.extend(url for url in filtered if url not in known)
+
     hakrawler_urls = []
     seen_hakrawler_origins = set()
     for url in selected["hakrawler"]:
