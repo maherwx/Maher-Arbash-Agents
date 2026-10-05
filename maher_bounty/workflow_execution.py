@@ -105,6 +105,7 @@ def _observation(response, checks):
     body = response["body"].encode("utf-8")
     return {"status": response["status"], "body_sha256": hashlib.sha256(body).hexdigest(),
             "body_bytes": len(body), "truncated": response.get("truncated", False), "assertions": checks,
+            "network_incomplete": response.get("network_incomplete", False),
             "representation": "rendered_dom" if response.get("browser_derived") else "http_body"}
 
 
@@ -333,7 +334,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                 for repeat in range(2):
                     response = send(name, case["request"])
                     checks = _assertions(response, {"statuses": [200], **case["proof"]})
-                    valid = bool(checks) and all(c["passed"] for c in checks) and not response.get("truncated")
+                    valid = bool(checks) and all(c["passed"] for c in checks) and not response.get("truncated") and not response.get("network_incomplete")
                     rows.append({"identity": name, "role": "allowed", "repeat": repeat,
                                  **_observation(response, checks)})
                     if not valid:
@@ -348,6 +349,8 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                     hits.append(hit)
                     rows.append({"identity": name, "role": "denied", "repeat": repeat,
                                  **_observation(response, checks), "differential": compare_responses(control, response)})
+                    if response.get("network_incomplete"):
+                        raise RuntimeError("incomplete browser network evidence")
                 if all(hits):
                     findings.append({"source": "workflow_execution", "title": f"Access policy violated: {case['id']} ({name})",
                                      "target": case["request"]["url"], "severity": "high", "validated": True,
@@ -380,7 +383,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                 response = send(name, request)
                 checks = _assertions(response, expected)
                 rows.append({"step": index, "identity": name, **_observation(response, checks)})
-                if response.get("truncated") or not checks:
+                if response.get("truncated") or response.get("network_incomplete") or not checks:
                     raise RuntimeError("incomplete workflow evidence")
                 if not all(c["passed"] for c in checks):
                     findings.append({"source": "workflow_execution", "title": f"Workflow invariant violated: {workflow['id']} step {index}",
