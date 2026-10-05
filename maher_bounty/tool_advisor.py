@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+from .zap_cli import find_zap_executable
 from typing import Iterable
 
 
@@ -102,7 +103,8 @@ def recommend_tools(inventory: dict | None = None, *, include_active: bool = Fal
         elif item["command"] is None:
             state = "manual_or_report_import"
         else:
-            state = "available" if shutil.which(item["command"]) else "not_installed"
+            executable = find_zap_executable() if item["command"] == "zap-baseline.py" else shutil.which(item["command"])
+            state = "available" if executable else "not_installed"
         recommendations.append({
             "name": item["name"],
             "command": item["command"],

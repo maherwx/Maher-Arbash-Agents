@@ -9,9 +9,16 @@ import yaml
 
 from maher_bounty.zap_cli import run_zap_baseline
 from maher_bounty.agent_tool_router import run_agent_tool_requests
+from maher_bounty.tool_advisor import recommend_tools
 
 
 class ZapCliTests(unittest.TestCase):
+    def test_recommendations_recognize_all_zap_execution_variants(self):
+        for installed in ["zap-baseline.py", "zaproxy", "zap.sh", None]:
+            with self.subTest(installed=installed), patch("maher_bounty.zap_cli.shutil.which", side_effect=lambda name: name if name == installed else None):
+                row = next(row for row in recommend_tools({"http": [{"url": "https://app.example.test/"}]})["tools"] if row["command"] == "zap-baseline.py")
+                self.assertEqual(row["state"], "available" if installed else "not_installed")
+
     def test_agent_zap_aliases_use_shared_native_adapter(self):
         url = "https://app.example.test/"
         for alias in ["zap", "zaproxy", "zap.sh", "zap-baseline.py"]:
