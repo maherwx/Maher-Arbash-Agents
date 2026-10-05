@@ -52,7 +52,13 @@ class BrowserRuntimeTests(unittest.TestCase):
                 if self.path == "/rotate":
                     self.send_header("Set-Cookie", "session=rotated; Path=/")
                 self.end_headers()
-                if self.path == "/delayed-action":
+                if self.path == "/numeric":
+                    text = '<span id="balance" data-total="10.5">10.5</span>'
+                elif self.path == "/numeric-json":
+                    text = '<pre id="payload">{"balance":9}</pre>'
+                elif self.path == "/numeric-invalid":
+                    text = '<span id="balance">USD 10.5</span>'
+                elif self.path == "/delayed-action":
                     text = "<div>ready</div><script>setTimeout(()=>document.body.insertAdjacentHTML('beforeend','<button id=late>continue</button>'),700)</script>"
                 elif self.path == "/async-state":
                     text = "<div id=state>loading</div><script>fetch('/state-api').then(r=>r.json()).then(x=>document.querySelector('#state').textContent=x.state)</script>"
@@ -80,6 +86,33 @@ class BrowserRuntimeTests(unittest.TestCase):
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
+
+    def test_numeric_dom_capture_drives_typed_invariant(self):
+        for attribute in [None, "data-total"]:
+            capture = {"selector": "#balance", "type": "number"}
+            if attribute:
+                capture["attribute"] = attribute
+            config = {"engine": "browser", "identities": {"owner": {"origin": self.origin}},
+                      "workflows": [{"id": "balance", "identity": "owner", "steps": [
+                          {"request": {"url": self.origin + "/numeric", "browser": {"capture_dom": {"initial": capture}}},
+                           "expect": {"statuses": [200]}},
+                          {"request": {"url": self.origin + "/numeric-json", "browser": {"body_selector": "#payload"}},
+                           "expect": {"json_number": {"/balance": {"gte": 0, "lte": "{{initial}}"}}}}]}]}
+            with tempfile.TemporaryDirectory() as td:
+                result = execute_workflows(config, {"assets": [self.origin]}, td, authorized=True)
+            self.assertEqual(result["decisions"][0]["status"], "completed")
+            self.assertFalse(result["findings"])
+
+    def test_invalid_numeric_capture_stops_dependent_browser_request(self):
+        config = {"engine": "browser", "identities": {"owner": {"origin": self.origin}},
+                  "workflows": [{"id": "balance", "identity": "owner", "steps": [
+                      {"request": {"url": self.origin + "/numeric-invalid", "browser": {"capture_dom": {
+                          "initial": {"selector": "#balance", "type": "number"}}}}, "expect": {"statuses": [200]}},
+                      {"request": {"url": self.origin + "/numeric-json"}, "expect": {"statuses": [200]}}]}]}
+        with tempfile.TemporaryDirectory() as td:
+            result = execute_workflows(config, {"assets": [self.origin]}, td, authorized=True)
+        self.assertEqual(result["decisions"][0]["status"], "inconclusive")
+        self.assertNotIn("/numeric-json", [path for path, _ in self.seen])
         self.thread.join(2)
 
     def execute(self, config):

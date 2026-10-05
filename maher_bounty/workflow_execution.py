@@ -140,10 +140,12 @@ def _validate_browser_settings(settings):
     for variable, capture in captures.items():
         if not isinstance(variable, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", variable):
             raise ValueError("invalid DOM capture variable")
-        if (not isinstance(capture, dict) or set(capture) - {"selector", "attribute"}
+        if (not isinstance(capture, dict) or set(capture) - {"selector", "attribute", "type"}
                 or not isinstance(capture.get("selector"), str) or not capture["selector"].strip()
                 or ("attribute" in capture and (not isinstance(capture["attribute"], str) or not capture["attribute"].strip()))):
             raise ValueError("invalid DOM capture specification")
+        if not isinstance(capture.get("type", "text"), str) or capture.get("type", "text") not in {"text", "number"}:
+            raise ValueError("DOM capture type must be text or number")
 
 
 def _json_pairs(pairs):
