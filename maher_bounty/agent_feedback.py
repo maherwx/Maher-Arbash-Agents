@@ -5,9 +5,11 @@ from .scope_policy import filter_in_scope_urls
 
 
 def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testing=None,
-                            tool_plan=None, target_references=None, max_rounds=3):
+                            tool_plan=None, target_references=None, max_rounds=3, reviewer=None):
     if type(max_rounds) is not int or not 1 <= max_rounds <= 3:
         raise ValueError("agent feedback requires one to three rounds")
+    if reviewer is not None and not callable(reviewer):
+        raise ValueError("execution reviewer must be callable")
     known, rejected = filter_in_scope_urls(known_urls, scope)
     known = list(dict.fromkeys(known))
     initial = set(known)
@@ -17,6 +19,8 @@ def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testi
     aggregate = {"mode": "bounded_local_execution_feedback", "request_count": 0,
                  "runs": [], "findings": [], "decisions": [], "rounds": [],
                  "new_in_scope_urls": [], "rejected_inventory_url_count": len(rejected)}
+    if reviewer is not None:
+        aggregate["review_rounds"] = []
     pending = results
     stop = "round_limit"
     for index in range(max_rounds):
@@ -82,11 +86,30 @@ def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testi
         aggregate["rounds"].append({"round": index + 1, "new_url_count": len(fresh),
                                     "run_count": len(summary.get("runs", [])),
                                     "finding_count": len(summary.get("findings", []))})
-        if not fresh:
+        reviews = []
+        if reviewer is not None:
+            packet = {"round": index + 1, "can_schedule_next_round": index + 1 < max_rounds,
+                      "known_urls": list(known), "new_in_scope_urls": list(fresh),
+                      "runs": list(aggregate["runs"]), "findings": list(aggregate["findings"]),
+                      "decisions": list(aggregate["decisions"])}
+            try:
+                response = reviewer(packet)
+                if not isinstance(response, list):
+                    raise ValueError("execution review requires agent results")
+                reviews = [row for row in response[:8] if isinstance(row, dict)]
+                aggregate["review_rounds"].append({"round": index + 1, "agent_count": len(reviews),
+                    "requested_batches": sum(len(row.get("tool_requests", [])) for row in reviews
+                                             if isinstance(row.get("tool_requests", []), list))})
+            except Exception as exc:
+                aggregate["review_rounds"].append({"round": index + 1, "status": "error",
+                                                   "error_type": type(exc).__name__})
+        has_requests = any(bool(row.get("tool_requests")) for row in reviews
+                           if isinstance(row.get("tool_requests"), list))
+        if not fresh and not has_requests:
             stop = "no_new_in_scope_evidence"
             break
-        pending = build_local_tool_requests(known, scope=scope, active_testing=context,
-                                           tool_plan=tool_plan)["agent_results"]
+        pending = [*reviews, *build_local_tool_requests(known, scope=scope, active_testing=context,
+                                                       tool_plan=tool_plan)["agent_results"]]
     aggregate["stop_reason"] = stop
     aggregate["known_in_scope_url_count"] = len(initial | set(aggregate["new_in_scope_urls"]))
     return aggregate

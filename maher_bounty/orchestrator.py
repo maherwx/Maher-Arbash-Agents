@@ -239,6 +239,32 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
 
         followup_summary = {"mode": "not_run", "runs": [], "findings": [], "decisions": []}
         local_tool_plan = {"agent_results": [], "request_count": 0, "mode": "not_run"}
+        def review_execution_round(packet):
+            # Each specialist sees actual runs plus reviews from earlier peers.
+            round_active = {**active_testing, "agent_tool_followups": packet}
+            round_active["findings"] = _dedupe([*active_testing.get("findings", []), *packet["findings"]])
+            round_validation = validate_evidence(normalize_evidence(round_active))
+            round_inventory = {**context_inventory,
+                               "endpoints": [{"value": url} for url in packet["known_urls"][:120]]}
+            reviewers = {"web_surface_reviewer", "xss_surface_reviewer", "rest_reviewer", "evidence_reviewer"}
+            reviews = []
+            for specialist in agents:
+                if specialist.get("id") not in reviewers:
+                    continue
+                review = model.analyze(specialist, {
+                    "scope": scope, "rules": rules, "inventory": round_inventory,
+                    "application_intelligence": intelligence, "validated_evidence": round_validation,
+                    "active_testing": round_active, "active_findings": round_active["findings"],
+                    "traffic_evidence": traffic_evidence, "prior_agent_evidence": evidence_bus(results),
+                    "execution_feedback": packet, "research_directives": directives,
+                    "research_method": {"mode": "execution_round_review", "round": packet["round"],
+                                        "can_schedule_next_round": packet["can_schedule_next_round"]},
+                })
+                results.append(review)
+                reviews.append(review)
+                store.add_evidence(run_id, review.get("agent", "unknown"), "execution_round_review", review)
+            store.checkpoint(run_id, f"execution_round_{packet['round']}_reviews", reviews)
+            return reviews
         if active_enabled:
             known_followup_urls = [
                 *active_testing.get("discovered_in_scope_urls", []),
@@ -258,6 +284,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 active_testing=active_testing,
                 tool_plan=inventory.get("tool_plan", {}),
                 target_references=traffic_target_refs,
+                **({"reviewer": review_execution_round} if model.enabled else {}),
             )
             followup_summary["planner_mode"] = (
                 "local_model_plus_deterministic_coordinator" if model.enabled

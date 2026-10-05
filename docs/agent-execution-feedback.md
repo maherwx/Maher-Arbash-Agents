@@ -32,3 +32,19 @@ not autonomous language-model reasoning. This change does not implement
 automatic credential discovery, policy inference, proof of impact, or arbitrary
 application-specific workflow generation. It reuses installed scanners;
 missing tools remain visible in the report instead of being claimed as run.
+
+When the in-process GGUF model is enabled, four available specialist roles
+(web surface, XSS surface, REST, evidence) review each completed execution batch.
+Their packet contains actual runs, decisions, findings and newly known scoped
+routes. Earlier peers' reviews enter the shared evidence bus before later peers
+analyze the same batch. Reviews are checkpointed separately from actual tool runs.
+
+A specialist can request a complementary tool on an already observed route even
+when no new route was discovered. The next batch still applies the shared attempt
+ledger, known-target checks and three-round budget. The final review knows no more
+batches can be scheduled. Review errors are recorded; deterministic discovery can
+continue when fresh routes exist. Without a local model the deterministic execution
+loop remains available, and no specialist model review is reported as having run.
+
+This change has not been executed or tested following the user's instruction to
+edit the tool without experiments. Runtime verification remains outstanding.

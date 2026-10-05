@@ -20,6 +20,7 @@ _AGENT_CONTEXT_FIELDS = (
     "prior_agent_evidence",
     "research_directives",
     "research_method",
+    "execution_feedback",
 )
 
 
@@ -78,7 +79,11 @@ _SYSTEM_PROMPT = (
     "of an exploitable issue. Do not claim a check ran unless its tool run is present. "
     "Never invent observations, endpoints, or proof. For each candidate finding, cite the "
     "exact in-scope URL and supplied evidence; distinguish observed facts from hypotheses "
-    "and proposed next checks. Prefer safe, non-destructive validation and respect all program "
+    "and proposed next checks. "
+    "When execution_feedback is supplied, review actual completed tool runs and peers' evidence, "
+    "then request a complementary unattempted check only when those results justify it. "
+    "If can_schedule_next_round is false, return no tool_requests and summarize execution evidence. "
+    "Prefer safe, non-destructive validation and respect all program "
     "rules. Return JSON only with keys: status, observations, candidate_findings, evidence_notes, "
     "next_checks, tool_requests. tool_requests must be a list of objects with tool set only to "
     "hakrawler, katana, httpx, nuclei, dalfox, browser-xss, zap-baseline.py, nikto, nmap, tlsx, whatweb, "
