@@ -459,12 +459,12 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                 for repeat in range(2):
                     response = send(name, case["request"])
                     checks = _assertions(response, {"statuses": [200], **case["proof"]})
-                    hit = all(c["passed"] for c in checks) and not response.get("truncated")
+                    hit = all(c["passed"] for c in checks)
                     hits.append(hit)
                     rows.append({"identity": name, "role": "denied", "repeat": repeat,
                                  **_observation(response, checks), "differential": compare_responses(control, response)})
-                    if response.get("network_incomplete"):
-                        raise RuntimeError("incomplete browser network evidence")
+                    if response.get("truncated") or response.get("network_incomplete"):
+                        raise RuntimeError("incomplete denied resource evidence")
                 if all(hits):
                     findings.append({"source": "workflow_execution", "title": f"Access policy violated: {case['id']} ({name})",
                                      "target": _safe_url(case["request"]["url"]), "severity": "high", "validated": True,
