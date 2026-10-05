@@ -46,25 +46,26 @@ def _normalized_url(target: str) -> str:
 
 def _run(cmd: list[str], *, stdout_path: Path | None = None, timeout: int = 30) -> dict:
     executable = cmd[0]
+    effective_timeout = max(1, int(timeout)) + 180
     if not shutil.which(executable):
         return {"tool": executable, "status": "missing", "command": cmd}
-    print(f"[tool] {executable} started (timeout={timeout}s)", flush=True)
+    print(f"[tool] {executable} started (timeout={effective_timeout}s; base={timeout}s + 180s)", flush=True)
     try:
         if stdout_path:
             stdout_path.parent.mkdir(parents=True, exist_ok=True)
             with stdout_path.open("w", encoding="utf-8") as fh:
-                cp = subprocess.run(cmd, stdout=fh, stderr=subprocess.PIPE, text=True, timeout=timeout, check=False)
+                cp = subprocess.run(cmd, stdout=fh, stderr=subprocess.PIPE, text=True, timeout=effective_timeout, check=False)
         else:
             cp = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
         status = "ok" if cp.returncode == 0 else "nonzero"
         print(f"[tool] {executable} {status}", flush=True)
-        return {"tool": executable, "status": status, "returncode": cp.returncode, "stderr": (cp.stderr or "")[-2000:], "command": cmd}
+        return {"tool": executable, "status": status, "returncode": cp.returncode, "stderr": (cp.stderr or "")[-2000:], "command": cmd, "timeout_seconds": effective_timeout}
     except subprocess.TimeoutExpired as exc:
         stderr = exc.stderr or ""
         if isinstance(stderr, bytes):
             stderr = stderr.decode("utf-8", errors="replace")
         print(f"[tool] {executable} timed out; continuing", flush=True)
-        return {"tool": executable, "status": "timeout", "command": cmd, "stderr": str(stderr)[-2000:]}
+        return {"tool": executable, "status": "timeout", "command": cmd, "timeout_seconds": effective_timeout, "stderr": str(stderr)[-2000:]}
 
 
 def plan_tools(target: str, rules: dict | None = None) -> dict:
