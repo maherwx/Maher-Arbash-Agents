@@ -88,5 +88,15 @@ Content proofs must use lists of nonempty string markers or a JSON Pointer
 mapping. Unknown assertion keys, scalar marker strings, empty assertions and
 invalid HTTP status lists fail before requests rather than becoming generic
 HTTP 200 evidence.
-Request and run budgets bound new work; an already running request can extend
-beyond the run deadline by its per-request timeout.
+HTTP body reads use bounded chunks and an elapsed deadline shared with the
+request/run budget, narrowing the socket timeout to the remaining body-read
+time. A body-socket watchdog interrupts reads at the elapsed deadline, including
+slow chunk framing that performs multiple underlying reads. Its timer is
+cancelled and joined after each read. Slow-drip data cannot repeatedly reset
+this read budget. Deadline checks
+also run after rate delays, before starting another HTTP request. Premature EOF
+with a remaining declared Content-Length and HTTP protocol read failures are
+inconclusive; matching text from a partial body cannot confirm a finding.
+DNS, connection/TLS setup and response-header processing retain urllib's
+underlying timeout behavior. This is not a strict wall-clock guarantee for the
+entire HTTP exchange; those phases may extend a run beyond its deadline.

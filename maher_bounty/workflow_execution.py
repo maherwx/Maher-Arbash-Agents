@@ -10,9 +10,12 @@ import json
 import math
 import os
 import re
+import socket
+import threading
 import time
 from http.cookiejar import CookieJar, Cookie
 from http.cookies import SimpleCookie
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, quote
@@ -219,10 +222,11 @@ def validate_manifest(manifest, scope):
 
 
 class Transport:
-    def __init__(self, identities, timeout=10, max_bytes=1048576, interval=0.2, budget=200):
+    def __init__(self, identities, timeout=10, max_bytes=1048576, interval=0.2, budget=200, deadline=None):
         self.identities = identities
         self.timeout, self.max_bytes, self.interval, self.budget = timeout, max_bytes, interval, budget
         self.count, self.last = 0, 0.0
+        self.deadline = deadline if deadline is not None else float("inf")
         self.openers = {}
         self.headers = {}
         self.seed_cookies = {}
@@ -267,8 +271,11 @@ class Transport:
         if self.count >= self.budget:
             raise RuntimeError("request budget exhausted")
         time.sleep(max(0, self.interval - (time.monotonic() - self.last)))
+        if time.monotonic() >= self.deadline:
+            raise RuntimeError("HTTP run deadline exhausted")
         self.count += 1
         self.last = time.monotonic()
+        read_deadline = min(self.deadline, self.last + self.timeout)
         headers = {**self.headers[name], **spec.get("headers", {})}
         body = spec.get("body")
         if isinstance(body, (dict, list)):
@@ -277,13 +284,71 @@ class Transport:
         request = Request(spec["url"], data=body.encode() if isinstance(body, str) else None,
                           headers=headers, method=spec.get("method", "GET").upper())
         try:
-            response = self.openers[name].open(request, timeout=self.timeout)
+            response = self.openers[name].open(request, timeout=max(0.001, read_deadline - time.monotonic()))
         except HTTPError as exc:
             response = exc
         with response:
-            raw = response.read(self.max_bytes + 1)
+            raw = self._read_body(response, read_deadline)
             return {"status": response.code, "body": raw[:self.max_bytes].decode("utf-8", errors="replace"),
                     "headers": dict(response.headers), "truncated": len(raw) > self.max_bytes}
+
+    def _read_body(self, response, deadline):
+        # HTTPError wraps HTTPResponse; locate its socket to narrow each read
+        # to the remaining elapsed-time budget rather than reset inactivity.
+        stream = response
+        sock = None
+        for _ in range(3):
+            stream = getattr(stream, "fp", None)
+            if stream is None:
+                break
+            sock = getattr(getattr(stream, "raw", None), "_sock", None)
+            if sock is not None:
+                break
+        read = getattr(response, "read1", response.read)
+        actual_response = getattr(read, "__self__", response)
+        timer = None
+        if sock is not None:
+            # Chunk framing may internally perform multiple reads. Interrupt
+            # the body socket at the elapsed deadline, even during framing.
+            def interrupt():
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            timer = threading.Timer(max(0, deadline - time.monotonic()), interrupt)
+            timer.daemon = True
+            timer.start()
+        try:
+            return self._read_chunks(read, actual_response, sock, deadline)
+        finally:
+            if timer is not None:
+                timer.cancel()
+                timer.join()
+
+    def _read_chunks(self, read, actual_response, sock, deadline):
+        raw = bytearray()
+        while len(raw) <= self.max_bytes:
+            if callable(getattr(actual_response, "isclosed", None)) and actual_response.isclosed():
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP response read deadline exhausted")
+            if sock is not None:
+                sock.settimeout(remaining)
+            try:
+                chunk = read(min(65536, self.max_bytes + 1 - len(raw)))
+            except (OSError, HTTPException):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("HTTP response read deadline exhausted") from None
+                raise
+            if time.monotonic() >= deadline:
+                raise TimeoutError("HTTP response read deadline exhausted")
+            if not chunk:
+                break
+            raw.extend(chunk)
+        if len(raw) <= self.max_bytes and (getattr(actual_response, "length", None) or 0) > 0:
+            raise RuntimeError("incomplete HTTP response body")
+        return bytes(raw)
 
 
 def execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=None):
@@ -319,7 +384,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
     budget = max(1, min(int(limits.get("max_requests", 200)), 2000))
     deadline = time.monotonic() + max(1, min(float(limits.get("total_seconds", 300)), 3600))
     sender = transport or Transport(manifest["identities"], timeout=timeout, budget=budget,
-                                   interval=max(0.1, float(limits.get("interval_seconds", 0.2))))
+                                   interval=max(0.1, float(limits.get("interval_seconds", 0.2))), deadline=deadline)
     observations, findings, decisions = [], [], []
     count = 0
 
@@ -361,7 +426,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                                      "evidence": {"case_id": case["id"], "identity": name, "observations": rows.copy()},
                                      "basis": "explicit policy, valid allowed controls, repeatable forbidden resource proof"})
             decisions.append({"id": case["id"], "status": "completed"})
-        except (OSError, URLError, RuntimeError, ValueError) as exc:
+        except (OSError, URLError, RuntimeError, ValueError, HTTPException) as exc:
             # Do not persist exception text, which can contain credential values.
             decisions.append({"id": case["id"], "status": "inconclusive", "error_type": type(exc).__name__})
         observations.append({"id": case["id"], "observations": rows})
@@ -401,7 +466,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                 variables.update(response.get("captured", {}))
             else:
                 decisions.append({"id": workflow["id"], "status": "completed"})
-        except (OSError, URLError, RuntimeError, ValueError, KeyError, IndexError, TypeError) as exc:
+        except (OSError, URLError, RuntimeError, ValueError, KeyError, IndexError, TypeError, HTTPException) as exc:
             decisions.append({"id": workflow["id"], "status": "inconclusive", "error_type": type(exc).__name__})
         observations.append({"id": workflow["id"], "observations": rows})
 
