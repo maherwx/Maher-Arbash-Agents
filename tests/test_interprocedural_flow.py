@@ -20,6 +20,16 @@ class InterproceduralFlowTests(unittest.TestCase):
         self.assertIn("x",result["functions"]["b"]["transitive_reads"])
         self.assertIn("y",result["functions"]["a"]["transitive_writes"])
 
+    def test_long_call_chain_propagates_in_few_fixpoint_rounds(self):
+        count = 100
+        ir = {
+            "functions": [{"id": str(i), "reads": [f"v{i}"], "writes": []} for i in range(count)],
+            "call_edges": [{"from": str(i), "to": str(i + 1)} for i in range(count - 1)],
+        }
+        result = build_flow_graph(ir)
+        self.assertIn(f"v{count - 1}", result["functions"]["0"]["transitive_reads"])
+        self.assertLessEqual(result["fixpoint_rounds"], 3)
+
     def test_trace_variable(self):
         ir={"functions":[{"id":"a","reads":["token"],"writes":[]}],"call_edges":[]}
         result=trace_variable(ir,"token")
