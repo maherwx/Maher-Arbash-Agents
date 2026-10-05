@@ -44,6 +44,7 @@ def main():
     r.add_argument("--rules", required=True)
     r.add_argument("--out", default="reports")
     r.add_argument("--inventory", default=None, help="Normalized inventory.json to feed the research engine")
+    r.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
     r.add_argument("--authorized", action="store_true", help="Confirm permission for active checks against the supplied scope")
 
     auto = s.add_parser("auto-run", help="Collect target inventory and run the full collaborative pipeline")
@@ -51,6 +52,7 @@ def main():
     auto.add_argument("--authorized", action="store_true", help="Confirm you own or have explicit permission to test this target")
     auto.add_argument("--rules", default=None, help="Optional rules YAML; safe defaults are used when omitted")
     auto.add_argument("--out", default="results/auto")
+    auto.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
 
     inv = s.add_parser("inventory", help="Normalize and deduplicate collected recon data")
     inv.add_argument("result_dir")
@@ -125,7 +127,7 @@ def main():
         print(json.dumps(write_status(_service_config(a)), indent=2))
         return
     if a.cmd == "run":
-        result = run(a.scope, a.rules, a.out, a.inventory, authorized=a.authorized)
+        result = run(a.scope, a.rules, a.out, a.inventory, authorized=a.authorized, traffic_path=a.traffic)
         active = result.get("active_testing", {})
         status = active.get("status", "completed" if active else "skipped")
         findings = active.get("unique_findings", len(active.get("findings", [])))
@@ -142,7 +144,7 @@ def main():
         )
         return
     if a.cmd == "auto-run":
-        result = run_target(a.target, a.rules, a.out, authorized=a.authorized)
+        result = run_target(a.target, a.rules, a.out, authorized=a.authorized, traffic_path=a.traffic)
         active = result.get("active_testing", {})
         validation = result.get("validated_evidence", {}).get("counts", {})
         print(json.dumps({
