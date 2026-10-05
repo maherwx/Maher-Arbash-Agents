@@ -93,7 +93,10 @@ class WorkflowExecutionTests(unittest.TestCase):
             calls[name] = calls.get(name, 0) + 1
             return {"status": 200 if name == "owner" or calls[name] == 1 else 403,
                     "body": '{"id":42,"owner":"owner"}', "headers": {}}
-        self.assertFalse(self.run_case(sender=sender)["findings"])
+        result = self.run_case(sender=sender)
+        self.assertFalse(result["findings"])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["decisions"][0]["error_type"], "InconsistentAccessEvidence")
 
     def test_truncated_control_and_budget_stop_without_confirmation(self):
         result = self.run_case(sender=lambda *_: {"status": 200, "body": '{"id":42,"owner":"owner"}', "truncated": True})

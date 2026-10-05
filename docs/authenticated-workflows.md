@@ -1,5 +1,13 @@
 # Authenticated access policies and workflow invariants
 
+Access-policy evidence repeats each forbidden identity's resource proof twice.
+Two matches can confirm a policy violation; two misses complete that check
+without a finding. One match and one miss are inconclusive, stop that case and
+make the run partial. Evidence records each forbidden attempt's proof outcome.
+An earlier repeatable finding remains supported even if a different identity
+later produces inconsistent results. None of these outcomes claim exhaustive
+coverage or prove security outside the explicitly configured policy.
+
 Workflow variable dependencies are checked before any request or session reset.
 `{{name}}` in request URLs, bodies, headers, browser plans and expectations must
 refer to a named initial `variables` value or a JSON/DOM capture from an earlier
