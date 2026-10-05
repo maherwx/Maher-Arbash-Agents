@@ -32,6 +32,10 @@ class TrafficPipelineV2Tests(unittest.TestCase):
             result = analyze_traffic(source, kind="har", out_dir=out, db_path=root / "research.db")
             self.assertEqual(result["schema_version"], "2.3")
             self.assertIn("protocols", result)
+            self.assertEqual(set(result["advanced_web_tools"]), {
+                "request_surface", "auth_boundary", "response_posture",
+                "parameter_behavior", "workflow_transitions",
+            })
             self.assertIn("workflow", result)
             self.assertIn("test_matrix", result)
             self.assertIn("priorities", result)
@@ -45,7 +49,7 @@ class TrafficPipelineV2Tests(unittest.TestCase):
                 "canonical-http.json", "behavior-model.json", "anomalies.json",
                 "protocol-intelligence.json", "workflow-model.json",
                 "workflow-divergences.json", "test-matrix.json", "priorities.json",
-                "knowledge-graph.json", "provenance-chains.json",
+                "knowledge-graph.json", "advanced-web-tools.json", "provenance-chains.json",
                 "provenance-summary.json", "evidence-report.json", "correlations.json", "summary.json",
             ):
                 self.assertTrue((out / name).exists(), name)
