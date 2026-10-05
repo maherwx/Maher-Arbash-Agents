@@ -15,6 +15,9 @@ more `gt`, `gte`, `lt`, or `lte` bounds. All comparisons must pass. For example:
 Capture `initial_balance` from an earlier successful step, or declare it as a
 numeric workflow variable. Exact template substitution preserves its JSON type.
 Bounds must be finite numbers; booleans and numeric strings are rejected.
+Bounds referring to initial variables are checked before any traffic when their
+values are already known. An earlier successful JSON or DOM capture replaces
+that initial value, so the captured bound is checked at runtime instead.
 Malformed bounds, unknown operators and undeclared variables fail manifest
 preflight before any workflow traffic. A nonnumeric captured bound stops the
 dependent step before its request; earlier traffic has already occurred.
