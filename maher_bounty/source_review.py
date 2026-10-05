@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from .source_languages import language_for, generic_candidates
 from .source_semgrep import review_semgrep
+from .source_map import build_source_map
 
 
 EXCLUDED = {".git", ".venv", "venv", "node_modules", "vendor", "__pycache__", "build", "dist"}
@@ -206,10 +207,12 @@ def review_source(source_dir, out_dir):
     for row in coverage.values():
         row["analysis_modes"] = sorted(row["analysis_modes"])
     gaps = [name for name, row in coverage.items() if row["parser_reviewed_files"] < row["file_count"]]
-    status = "partial" if skipped or truncated or gaps or engine["status"] not in {"ok", "not_applicable"} else "completed" if files else "no_supported_source"
+    structure = build_source_map(snapshots, files, findings)
+    status = "partial" if skipped or truncated or gaps or structure["truncated"] or structure["errors"] or engine["status"] not in {"ok", "not_applicable"} else "completed" if files else "no_supported_source"
     report = {"mode": "local_static_source_review", "status": status,
               "languages": sorted(coverage), "language_coverage": coverage, "parser_coverage_gaps": gaps,
               "engines": [engine], "files": files, "findings": findings,
+              "source_structure": structure,
               "file_count": len(files), "candidate_count": len(findings), "skipped": skipped,
               "truncated": truncated, "runtime_verified": False,
               "limitations": ["heuristic intra-region propagation; no interprocedural/control-flow proof",
@@ -219,4 +222,5 @@ def review_source(source_dir, out_dir):
                               "binary files and unsupported encodings are not reviewed; no server-source download"]}
     output.mkdir(parents=True, exist_ok=True)
     (output / "source-review.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output / "source-structure.json").write_text(json.dumps(structure, ensure_ascii=False, indent=2), encoding="utf-8")
     return report

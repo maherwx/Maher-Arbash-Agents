@@ -41,7 +41,7 @@ claims a missing engine ran. Semgrep's scanned-path list supplies file coverage,
 and scanner parser/rule errors make the result partial.
 
 Reports contain relative file paths, SHA256 hashes, source/sink line references,
-sink symbols and candidate explanations; source text and literal values are not
+sink symbols and candidate explanations; source bodies and matched secret values are not
 copied into reports/model packets. Optional in-process GGUF reviewers receive
 these static evidence summaries along with the normal assessment packet. Without
 a configured local model the native AST analyzer remains usable, but model roles
@@ -71,6 +71,24 @@ and subsequent runtime verification when authorized.
 
 A website URL does not provide its server source code. Supply the application's
 source directory; no remote repository is cloned or server source recovered.
+
+`source-structure.json` and the report's `source_structure` add resolved local
+import edges, declared route locations and a deterministic file-review priority
+list. Python import/decorator syntax uses AST; JavaScript/TypeScript relative
+module imports and app/router/server route declarations use text patterns.
+Only edges to files already in the bounded snapshot are included. Route paths
+must be short, begin with `/` and contain allowed path/template characters;
+query values, host URLs and arbitrary strings are not copied. Python candidate
+lines inside a decorated handler are linked by lexical containment; JS/TS
+declarations have no handler dataflow link. The map is limited to 1,000 edges,
+200 routes and 30 priority files, with truncation/errors explicit.
+
+Priority combines candidate count, route declarations and incoming local import
+edges. This is a review-order heuristic, not a severity or exploitability score.
+Route prefixes, wrappers, dynamic imports and runtime registrations may be missed.
+The map is not a complete call graph or dependency-vulnerability analysis and
+does not expand network scope or automatically schedule checks against a route.
+Model roles receive this structure only when their configured local model runs.
 Source evidence does not expand the network authorization scope. No source review,
 tests, experiments, model execution or target scan was run for this code change;
 it was reviewed statically only and remains unverified at runtime.
