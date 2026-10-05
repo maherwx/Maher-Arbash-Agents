@@ -29,10 +29,31 @@ def _record(url: str, method: str = "GET", status: int | None = None, request: s
         "path": u.path or "/",
         "method": method.upper(),
         "status": status,
-        "request_raw": request,
-        "response_raw": response,
+        "request_raw": _redact_headers(request),
+        "response_raw": _redact_headers(response),
         **{k:v for k,v in context.items() if v is not None},
     }
+
+
+def _redact_headers(raw: str) -> str:
+    sensitive = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token", "x-csrf-token"}
+    if raw.lstrip().startswith("{"):
+        try:
+            message = json.loads(raw)
+            for row in message.get("headers", []):
+                if str(row.get("name", "")).lower() in sensitive:
+                    row["value"] = "[redacted]"
+            for row in message.get("cookies", []):
+                row["value"] = "[redacted]"
+            return json.dumps(message, ensure_ascii=False)
+        except (ValueError, AttributeError, TypeError):
+            return raw
+    boundary = re.search(r"\r?\n\r?\n", raw)
+    head = raw[:boundary.start()] if boundary else raw
+    tail = raw[boundary.start():] if boundary else ""
+    for name in sensitive:
+        head = re.sub(r"(?im)^(" + re.escape(name) + r":)[^\r\n]*", r"\1 [redacted]", head)
+    return head + tail
 
 
 def _har_headers(req: dict) -> dict[str,str]:

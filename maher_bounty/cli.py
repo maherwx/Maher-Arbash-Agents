@@ -7,6 +7,7 @@ from .orchestrator import run, run_target
 from .result_store import build_inventory
 from .traffic_ingest import ingest_traffic
 from .traffic_pipeline import analyze_traffic
+from .workflow_execution import execute_workflows
 from .continuous_service import ContinuousAnalysisService, ServiceConfig, write_status
 
 
@@ -46,6 +47,7 @@ def main():
     r.add_argument("--inventory", default=None, help="Normalized inventory.json to feed the research engine")
     r.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
     r.add_argument("--authorized", action="store_true", help="Confirm permission for active checks against the supplied scope")
+    r.add_argument("--workflow-manifest", default=None, help="JSON manifest of test identities, access policies and workflow invariants")
 
     auto = s.add_parser("auto-run", help="Collect target inventory and run the full collaborative pipeline")
     auto.add_argument("--target", required=True, help="Authorized website/domain target")
@@ -53,6 +55,13 @@ def main():
     auto.add_argument("--rules", default=None, help="Optional rules YAML; safe defaults are used when omitted")
     auto.add_argument("--out", default="results/auto")
     auto.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
+    auto.add_argument("--workflow-manifest", default=None, help="Execute authenticated access policies and workflow invariants")
+
+    wf = s.add_parser("workflow-run", help="Execute application-specific access policies and workflow invariants")
+    wf.add_argument("manifest", help="JSON assessment manifest")
+    wf.add_argument("--scope", required=True, help="JSON scope with assets and out_of_scope")
+    wf.add_argument("--authorized", action="store_true")
+    wf.add_argument("--out", default="results/workflows")
 
     inv = s.add_parser("inventory", help="Normalize and deduplicate collected recon data")
     inv.add_argument("result_dir")
@@ -90,6 +99,14 @@ def main():
 
     s.add_parser("doctor", help="Check local runtimes and research tools")
     a = p.parse_args()
+
+    if a.cmd == "workflow-run":
+        result = execute_workflows(json.loads(Path(a.manifest).read_text(encoding="utf-8")),
+                                   json.loads(Path(a.scope).read_text(encoding="utf-8")),
+                                   a.out, authorized=a.authorized)
+        print(json.dumps({"status": result["status"], "requests": result["requests"],
+                          "findings": len(result["findings"]), "out": a.out}, indent=2))
+        return
 
     if a.cmd == "doctor":
         raise SystemExit(doctor())
@@ -130,6 +147,7 @@ def main():
         result = run(
             a.scope, a.rules, a.out, a.inventory, authorized=a.authorized,
             **({"traffic_path": a.traffic} if a.traffic else {}),
+            **({"workflow_manifest_path": a.workflow_manifest} if a.workflow_manifest else {}),
         )
         active = result.get("active_testing", {})
         status = active.get("status", "completed" if active else "skipped")
@@ -151,6 +169,7 @@ def main():
         result = run_target(
             a.target, a.rules, a.out, authorized=a.authorized,
             **({"traffic_path": a.traffic} if a.traffic else {}),
+            **({"workflow_manifest_path": a.workflow_manifest} if a.workflow_manifest else {}),
         )
         active = result.get("active_testing", {})
         validation = result.get("validated_evidence", {}).get("counts", {})
