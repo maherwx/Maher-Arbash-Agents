@@ -127,6 +127,29 @@ class WorkflowExecutionTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 self.run_case(config)
 
+    def test_custom_identity_header_override_fails_before_traffic(self):
+        for header in ["X-API-Key", "x-api-key", "X-API-KEY"]:
+            config = manifest()
+            config["identities"]["other"]["headers_env"] = {"X-API-Key": "FIXTURE_KEY"}
+            config["access_cases"][0]["request"]["headers"] = {header: "override"}
+            with self.subTest(header=header), self.assertRaises(ValueError):
+                self.run_case(config)
+
+    def test_direct_http_custom_header_guard_preserves_unrelated_headers(self):
+        config = manifest()
+        config["identities"]["owner"]["headers_env"] = {"X-API-Key": "FIXTURE_KEY"}
+        with patch.dict(os.environ, {"FIXTURE_KEY": "fixture-secret"}):
+            sender = Transport(config["identities"], interval=0)
+        with self.assertRaises(ValueError):
+            sender("owner", {"url": "https://app.example.test/check", "headers": {"x-api-key": "override"}})
+        self.assertEqual(sender.count, 0)
+        with patch.object(sender.openers["owner"], "open", side_effect=OSError("fixture stop")) as opened:
+            with self.assertRaises(OSError):
+                sender("owner", {"url": "https://app.example.test/check", "headers": {"Accept": "application/json"}})
+        request = opened.call_args.args[0]
+        self.assertEqual(request.get_header("X-api-key"), "fixture-secret")
+        self.assertEqual(request.get_header("Accept"), "application/json")
+
     def test_missing_policy_proof_or_unknown_identity_is_rejected(self):
         for change in [{"proof": {}}, {"denied": ["missing"]}, {"denied": ["owner"]}]:
             config = manifest()

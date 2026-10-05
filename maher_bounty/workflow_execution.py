@@ -36,6 +36,11 @@ def _origin(url):
     return parsed.scheme, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
 
 
+def _protected_headers(identity):
+    return {"authorization", "cookie", "host", "proxy-authorization"} | {
+        header.lower() for header in identity.get("headers_env", {})}
+
+
 def _json_pairs(pairs):
     result = {}
     for key, value in pairs:
@@ -261,7 +266,7 @@ def validate_manifest(manifest, scope):
             raise ValueError("browser requests require GET navigation; use browser form actions for mutations")
         if method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}:
             raise ValueError("unsupported HTTP method")
-        if any(k.lower() in {"authorization", "cookie", "host", "proxy-authorization"} for k in request.get("headers", {})):
+        if any(k.lower() in _protected_headers(identities[name]) for k in request.get("headers", {})):
             raise ValueError("request headers must not override identity credentials or Host")
     return manifest
 
@@ -311,7 +316,7 @@ class Transport:
         if (parsed.scheme not in {"http", "https"} or parsed.username is not None or parsed.password is not None
                 or _origin(spec["url"]) != _origin(self.identities[name]["origin"])):
             raise ValueError("HTTP request outside identity origin")
-        if any(k.lower() in {"authorization", "cookie", "host", "proxy-authorization"} for k in spec.get("headers", {})):
+        if any(k.lower() in _protected_headers(self.identities[name]) for k in spec.get("headers", {})):
             raise ValueError("request headers cannot override identity credentials")
         if self.count >= self.budget:
             raise RuntimeError("request budget exhausted")
