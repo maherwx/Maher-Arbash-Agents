@@ -1,5 +1,6 @@
 """Bounded local execution feedback; deterministic coordination needs no model."""
 from pathlib import Path
+import hashlib
 from .agent_tool_router import run_agent_tool_requests, build_local_tool_requests, _coverage_key
 from .scope_policy import filter_in_scope_urls
 from .execution_journal import ExecutionJournal
@@ -43,6 +44,7 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
     aggregate = {"mode": "bounded_local_execution_feedback", "request_count": 0,
                  "runs": [], "findings": [], "decisions": [], "rounds": [],
                  "remaining_deferred_request_count": 0,
+                 "admitted_attempts": [],
                  "new_in_scope_urls": [], "rejected_inventory_url_count": len(rejected)}
     if reviewer is not None:
         aggregate["review_rounds"] = []
@@ -79,6 +81,10 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
         context, aggregate, pending = restored["context"], saved_aggregate, restored["pending"]
         if restored.get("finished") is True:
             return aggregate
+
+    aggregate.setdefault("admitted_attempts", [])
+    if not isinstance(aggregate["admitted_attempts"], list):
+        raise ValueError("execution journal admission evidence is invalid")
 
     def save(phase, next_round, finished=False):
         if journal is not None:
@@ -146,6 +152,8 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
             for item in admitted:
                 if isinstance(item, dict) and isinstance(item.get("tool"), str) and isinstance(item.get("target"), str):
                     attempted.add((item["tool"], _coverage_key(item["tool"], item["target"])))
+                    aggregate["admitted_attempts"].append({"round": index + 1, "tool": item["tool"],
+                        "coverage_sha256": hashlib.sha256(_coverage_key(item["tool"], item["target"]).encode("utf-8")).hexdigest()})
         else:
             # Compatibility for older router implementations without admission metadata.
             attempted.update(proposed)

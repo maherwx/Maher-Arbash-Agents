@@ -22,6 +22,8 @@ _AGENT_CONTEXT_FIELDS = (
     "research_method",
     "execution_feedback",
     "source_review",
+    "source_check_plan",
+    "source_check_admission_audit",
 )
 
 

@@ -25,6 +25,7 @@ from .workflow_execution import execute_workflows, validate_manifest
 from .source_review import review_source
 from .source_correlation import correlate_source_traffic
 from .artifact_io import write_json_atomic
+from .source_check_plan import build_source_check_plan, audit_source_checks
 
 
 def load_agents():
@@ -254,6 +255,8 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
 
         followup_summary = {"mode": "not_run", "runs": [], "findings": [], "decisions": []}
         local_tool_plan = {"agent_results": [], "request_count": 0, "mode": "not_run"}
+        source_tool_plan = {"agent_results": [], "tasks": [], "mode": "not_run"}
+        source_tool_audit = {"mode": "not_run", "tasks": []}
         def review_execution_round(packet):
             # Each specialist sees actual runs plus reviews from earlier peers.
             round_active = {**active_testing, "agent_tool_followups": packet}
@@ -273,6 +276,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                     "traffic_evidence": traffic_evidence, "prior_agent_evidence": evidence_bus(results),
                     "execution_feedback": packet, "research_directives": directives,
                     "source_review": source_review,
+                    "source_check_plan": {key: value for key, value in source_tool_plan.items() if key != "agent_results"},
                     "research_method": {"mode": "execution_round_review", "round": packet["round"],
                                         "can_schedule_next_round": packet["can_schedule_next_round"]},
                 })
@@ -292,8 +296,11 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 active_testing=active_testing,
                 tool_plan=inventory.get("tool_plan", {}),
             )
+            if source_dir:
+                source_tool_plan = build_source_check_plan(source_review, traffic_evidence, traffic_target_refs,
+                    known_followup_urls, scope, active_testing, inventory.get("tool_plan", {}))
             followup_summary = run_agent_tool_requests(
-                [*results, *local_tool_plan["agent_results"]],
+                [*source_tool_plan["agent_results"], *results, *local_tool_plan["agent_results"]],
                 known_followup_urls,
                 out / "active" / "agent-followups",
                 scope=scope,
@@ -308,6 +315,12 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 "local_model_plus_deterministic_coordinator" if model.enabled
                 else "local_deterministic_coordinator"
             )
+            if source_dir:
+                source_tool_audit = audit_source_checks(source_tool_plan, followup_summary, traffic_target_refs)
+                write_json_atomic(out / "source" / "source-check-plan.json",
+                    {key: value for key, value in source_tool_plan.items() if key != "agent_results"})
+                write_json_atomic(out / "source" / "source-check-audit.json", source_tool_audit)
+                store.checkpoint(run_id, "source_check_admission_audit", source_tool_audit)
             followup_summary["deterministic_plan"] = {
                 key: value for key, value in local_tool_plan.items() if key != "agent_results"
             }
@@ -339,6 +352,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                             "application_intelligence": intelligence, "agent_workstreams": workstreams,
                             "validated_evidence": validation, "native_engine_analysis": native,
                             "source_review": source_review,
+                            "source_check_admission_audit": source_tool_audit,
                             "traffic_evidence": traffic_evidence,
                             "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
                             "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
@@ -380,6 +394,8 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "active_testing": active_testing, "burp_traffic_evidence": traffic_evidence,
             "workflow_execution": workflow_execution,
             "source_review": source_review,
+            "source_check_plan": {key: value for key, value in source_tool_plan.items() if key != "agent_results"},
+            "source_check_admission_audit": source_tool_audit,
             "application_intelligence": intelligence,
             "validated_evidence": validation, "agent_workstreams": workstreams,
             "hypothesis_count": len(hypotheses), "hypotheses": hypotheses,
