@@ -10,7 +10,8 @@ import json
 import os
 import re
 import time
-from http.cookiejar import CookieJar
+from http.cookiejar import CookieJar, Cookie
+from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, quote
@@ -66,6 +67,31 @@ def _observation(response, checks):
             "representation": "rendered_dom" if response.get("browser_derived") else "http_body"}
 
 
+def _validate_expectation(expected):
+    supported = {"statuses", "contains", "absent", "json_equals"}
+    if not isinstance(expected, dict) or not expected or set(expected) - supported:
+        raise ValueError("expectations require supported assertion keys")
+    count = 0
+    for key in ("contains", "absent"):
+        if key in expected:
+            markers = expected[key]
+            if not isinstance(markers, list) or any(not isinstance(m, str) or not m.strip() for m in markers):
+                raise ValueError("content assertions require nonempty string markers in a list")
+            count += len(markers)
+    if "statuses" in expected:
+        statuses = expected["statuses"]
+        if not isinstance(statuses, list) or not statuses or any(type(s) is not int or not 100 <= s <= 599 for s in statuses):
+            raise ValueError("statuses must be a nonempty list of HTTP status integers")
+        count += 1
+    if "json_equals" in expected:
+        values = expected["json_equals"]
+        if not isinstance(values, dict) or any(not isinstance(p, str) or (p and not p.startswith("/")) for p in values):
+            raise ValueError("json_equals requires JSON Pointer keys")
+        count += len(values)
+    if not count:
+        raise ValueError("expectations require at least one actual assertion")
+
+
 def _resolve(value, variables, *, url=False):
     if isinstance(value, dict):
         return {key: _resolve(item, variables, url=(key == "url")) for key, item in value.items()}
@@ -101,6 +127,7 @@ def validate_manifest(manifest, scope):
             raise ValueError("access cases require disjoint allowed and denied identities")
         if any(name not in identities for name in allowed + denied):
             raise ValueError("unknown identity")
+        _validate_expectation(case.get("proof"))
         if not case.get("proof", {}).get("contains") and not case.get("proof", {}).get("json_equals"):
             raise ValueError("access cases require a resource-specific content proof")
         request = case.get("request", {})
@@ -118,6 +145,7 @@ def validate_manifest(manifest, scope):
         for step in workflow["steps"]:
             if not step.get("expect"):
                 raise ValueError("every workflow step requires expected behavior")
+            _validate_expectation(step["expect"])
             requests.append((step.get("request", {}), workflow["identity"]))
     for request, name in requests:
         url = request.get("url", "")
@@ -144,21 +172,45 @@ class Transport:
         self.count, self.last = 0, 0.0
         self.openers = {}
         self.headers = {}
+        self.seed_cookies = {}
         for name, identity in identities.items():
             self.headers[name] = {}
+            self.seed_cookies[name] = []
             for header, env_name in identity.get("headers_env", {}).items():
                 value = os.environ.get(env_name)
                 if not value:
                     raise ValueError(f"missing credential environment variable: {env_name}")
                 if header.lower() in {"host", "proxy-authorization"} or "\r" in value or "\n" in value:
                     raise ValueError("invalid identity header")
-                self.headers[name][header] = value
-            self.openers[name] = build_opener(ProxyHandler({}), NoRedirect(), HTTPCookieProcessor(CookieJar()))
+                if header.lower() == "cookie":
+                    parsed = SimpleCookie()
+                    parsed.load(value)
+                    if not parsed:
+                        raise ValueError("invalid HTTP cookie credential")
+                    origin = urlparse(identity["origin"])
+                    host = origin.hostname
+                    domain = host if "." in host or ":" in host else host + ".local"
+                    for key, morsel in parsed.items():
+                        self.seed_cookies[name].append(Cookie(0, key, morsel.value, None, False, domain, False, False,
+                                                              "/", True, origin.scheme == "https", None, True,
+                                                              None, None, {}, False))
+                else:
+                    self.headers[name][header] = value
+            self.reset(name)
 
     def reset(self, name):
-        self.openers[name] = build_opener(ProxyHandler({}), NoRedirect(), HTTPCookieProcessor(CookieJar()))
+        jar = CookieJar()
+        for cookie in self.seed_cookies[name]:
+            jar.set_cookie(cookie)
+        self.openers[name] = build_opener(ProxyHandler({}), NoRedirect(), HTTPCookieProcessor(jar))
 
     def __call__(self, name, spec):
+        parsed = urlparse(spec["url"])
+        if (parsed.scheme not in {"http", "https"} or parsed.username is not None or parsed.password is not None
+                or _origin(spec["url"]) != _origin(self.identities[name]["origin"])):
+            raise ValueError("HTTP request outside identity origin")
+        if any(k.lower() in {"authorization", "cookie", "host", "proxy-authorization"} for k in spec.get("headers", {})):
+            raise ValueError("request headers cannot override identity credentials")
         if self.count >= self.budget:
             raise RuntimeError("request budget exhausted")
         time.sleep(max(0, self.interval - (time.monotonic() - self.last)))
@@ -271,8 +323,10 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                 if (not is_in_scope_url(request["url"], scope)
                         or _origin(request["url"]) != _origin(manifest["identities"][name]["origin"])):
                     raise ValueError("resolved workflow request escaped scope or origin")
+                expected = _resolve(step["expect"], variables)
+                _validate_expectation(expected)
                 response = send(name, request)
-                checks = _assertions(response, _resolve(step["expect"], variables))
+                checks = _assertions(response, expected)
                 rows.append({"step": index, **_observation(response, checks)})
                 if response.get("truncated") or not checks:
                     raise RuntimeError("incomplete workflow evidence")

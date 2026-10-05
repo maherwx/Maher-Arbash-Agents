@@ -65,5 +65,13 @@ are supported by the default HTTP engine. For JavaScript execution, supplied
 login selectors and HTML token extraction, use the optional
 [browser engine](browser-workflows.md). Automatic login discovery and automatic
 token refresh remain unsupported.
+Supplied HTTP Cookie credentials initialize an isolated cookie jar; server
+Set-Cookie rotation updates that jar across workflow steps. Resetting a workflow
+restores its supplied starting credentials. Direct HTTP transport calls also
+enforce the identity's full origin and reject credential-header overrides.
+Content proofs must use lists of nonempty string markers or a JSON Pointer
+mapping. Unknown assertion keys, scalar marker strings, empty assertions and
+invalid HTTP status lists fail before requests rather than becoming generic
+HTTP 200 evidence.
 Request and run budgets bound new work; an already running request can extend
 beyond the run deadline by its per-request timeout.
