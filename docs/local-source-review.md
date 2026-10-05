@@ -27,6 +27,15 @@ shell-enabled subprocesses/os.system, eval/exec, pickle deserialization, Flask
 template bodies and file responses. Constant SQL statements with separate bound
 parameters do not match this first-argument taint check. No submitted code runs.
 
+Python review also makes four bounded passes through directly named, uniquely
+defined top-level functions in the same file. Positional/keyword arguments and
+return-source summaries can propagate request origins into a local helper's sink.
+FastAPI Query/Path/Body/Form/Header/Cookie markers and declared route placeholders
+seed recognized parameters. Methods, imports across files, dynamically selected
+callees, star-argument expansion and runtime alias rebinding are not resolved.
+Summaries merge call contexts conservatively; branches and sanitizer correctness
+remain unproven. The existing propagation work limit covers all four passes.
+
 When `semgrep` is installed, an optional local Community Edition adapter adds
 parser-based sensitive-sink patterns for JavaScript, TypeScript, Java, Go, PHP,
 Ruby, C, C++ and Rust. Only the bounded source snapshot is staged in a temporary
@@ -79,7 +88,8 @@ module imports and app/router/server route declarations use text patterns.
 Only edges to files already in the bounded snapshot are included. Route paths
 must be short, begin with `/` and contain allowed path/template characters;
 query values, host URLs and arbitrary strings are not copied. Python candidate
-lines inside a decorated handler are linked by lexical containment; JS/TS
+lines inside a decorated handler, or candidates whose same-file source lines fall
+inside that handler, are linked heuristically; JS/TS
 declarations have no handler dataflow link. The map is limited to 1,000 edges,
 200 routes and 30 priority files, with truncation/errors explicit.
 

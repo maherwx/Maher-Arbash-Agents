@@ -49,10 +49,12 @@ def build_source_map(snapshots, files, findings):
         if len(routes) >= 200:
             truncated = True
             return
-        associated = [row["line"] for row in findings if row["file"] == file
-                      and start is not None and start <= row["line"] <= end]
+        associated = [row["line"] for row in findings if row["file"] == file and start is not None
+                      and (start <= row["line"] <= end or any(type(value) is int and start <= value <= end
+                           for value in row.get("source_lines", [])))]
         routes.append({"file": file, "file_sha256": known[file]["sha256"], "line": line,
                        "declared_path": path, "method": method, "candidate_lines": sorted(set(associated)),
+                       "candidate_association": "same_file_sink_or_source_line_containment",
                        "runtime_verified": False, "authorizes_network_target": False})
 
     for file, data in snapshots.items():

@@ -3,6 +3,7 @@ import ast
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from .source_languages import language_for, generic_candidates
 from .source_semgrep import review_semgrep
@@ -56,8 +57,36 @@ def _python_findings(tree, relative):
     findings, seen = [], set()
     work = 0
     regions = [tree, *(node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))]
-    for region in regions:
-        tainted = {}
+    functions = {}
+    duplicate_names = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name in functions:
+                duplicate_names.add(node.name)
+            functions[node.name] = node
+    functions = {name: node for name, node in functions.items() if name not in duplicate_names and name not in aliases}
+    incoming, returned = {}, {}
+    # Four bounded passes carry positional/keyword inputs and return-source
+    # summaries through directly named functions in this file only.
+    for region in regions * 4:
+        tainted = {name: set(lines) for name, lines in incoming.get(region, {}).items()}
+        if isinstance(region, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            parameters = [*region.args.posonlyargs, *region.args.args, *region.args.kwonlyargs]
+            defaults = [None] * (len(region.args.posonlyargs) + len(region.args.args) - len(region.args.defaults)) + list(region.args.defaults) + list(region.args.kw_defaults)
+            path_parameters = set()
+            for decorator in region.decorator_list:
+                if isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute) and decorator.func.attr in {"route", "get", "post", "put", "patch", "delete", "head", "options"} and decorator.args:
+                    path = decorator.args[0]
+                    if isinstance(path, ast.Constant) and isinstance(path.value, str) and path.value.startswith("/"):
+                        path_parameters.update(re.findall(r"\{([A-Za-z_]\w*)\}|<(?:[A-Za-z_]+:)?([A-Za-z_]\w*)>", path.value))
+            path_names = {value for pair in path_parameters for value in pair if value}
+            for parameter, default in zip(parameters, defaults):
+                markers = [default, parameter.annotation]
+                explicit_input = any(isinstance(item, ast.Call) and canonical(item.func) in {
+                    "fastapi.Query", "fastapi.Path", "fastapi.Body", "fastapi.Form", "fastapi.Header", "fastapi.Cookie"
+                } for marker in markers if marker is not None for item in ast.walk(marker))
+                if parameter.arg in path_names or explicit_input:
+                    tainted.setdefault(parameter.arg, set()).add(parameter.lineno)
 
         def sources(expression):
             nonlocal work
@@ -68,6 +97,8 @@ def _python_findings(tree, relative):
                     raise SourceAnalysisLimit("source propagation work limit reached")
                 if isinstance(item, ast.Name):
                     found.update(tainted.get(item.id, set()))
+                if isinstance(item, ast.Call) and isinstance(item.func, ast.Name) and item.func.id in functions:
+                    found.update(returned.get(item.func.id, set()))
                 if isinstance(item, ast.Attribute) and item.attr in REQUEST_FIELDS:
                     owner = canonical(item.value).split(".")
                     if "request" in owner or "req" in owner:
@@ -85,7 +116,22 @@ def _python_findings(tree, relative):
                         for name in ast.walk(target):
                             if isinstance(name, ast.Name) and origin:
                                 tainted.setdefault(name.id, set()).update(origin)
-            if not isinstance(node, ast.Call) or not node.args:
+            if isinstance(node, ast.Return) and node.value is not None and isinstance(region, (ast.FunctionDef, ast.AsyncFunctionDef)) and functions.get(region.name) is region:
+                returned.setdefault(region.name, set()).update(sources(node.value))
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name) and node.func.id in functions:
+                callee = functions[node.func.id]
+                bindings = incoming.setdefault(callee, {})
+                positional = [*callee.args.posonlyargs, *callee.args.args]
+                positional_arguments = [] if any(isinstance(argument, ast.Starred) for argument in node.args) else node.args
+                for parameter, argument in zip(positional, positional_arguments):
+                    bindings.setdefault(parameter.arg, set()).update(sources(argument))
+                names = {parameter.arg for parameter in [*positional, *callee.args.kwonlyargs]}
+                for keyword in node.keywords:
+                    if keyword.arg in names:
+                        bindings.setdefault(keyword.arg, set()).update(sources(keyword.value))
+            if not node.args:
                 continue
             origin = sources(node.args[0])
             if not origin:
@@ -111,7 +157,7 @@ def _python_findings(tree, relative):
                     "line": node.lineno, "source_lines": sorted(origin), "sink": sink,
                     "source": "local_python_ast", "validated": False,
                     "status": "needs_review", "confidence": "heuristic",
-                    "evidence": "AST request-source propagation to a sensitive first argument; no runtime proof"})
+                    "evidence": "Bounded AST request-source propagation, including direct local calls, to a sensitive first argument; no runtime proof"})
                 if len(findings) >= 200:
                     return findings
     return findings
@@ -223,7 +269,7 @@ def review_source(source_dir, out_dir):
               "source_structure": structure,
               "file_count": len(files), "candidate_count": len(findings), "skipped": skipped,
               "truncated": truncated, "runtime_verified": False,
-              "limitations": ["heuristic intra-region propagation; no interprocedural/control-flow proof",
+              "limitations": ["four-pass same-file direct-call propagation; no whole-program/control-flow proof",
                               "sanitizers, import shadowing and generic execute methods need manual review",
                               "generic text checks work across text languages but do not prove dataflow",
                               "parser coverage depends on configured local rules and installed CE support",

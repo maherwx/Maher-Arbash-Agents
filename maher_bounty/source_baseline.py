@@ -5,7 +5,7 @@ from pathlib import Path
 from .execution_journal import _unique_fields, _invalid_constant
 
 
-SOURCE_ANALYSIS_REVISION = 1
+SOURCE_ANALYSIS_REVISION = 2
 ANALYSIS_MODES = {"local_python_ast": "python_ast", "local_generic_text": "generic_text", "local_semgrep_ce": "semgrep_ce"}
 
 
