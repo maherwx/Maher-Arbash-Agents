@@ -24,7 +24,7 @@ class AdaptiveToolFollowupTests(unittest.TestCase):
 
             def fake_exec(command, **kwargs):
                 if command[0] == "hakrawler":
-                    self.assertEqual(kwargs.get("input_text"), "https://app.example.test\n")
+                    self.assertEqual(kwargs.get("input_text"), target + "\n")
                     kwargs["output"].write_text(new_route + "\n" + outside + "\n", encoding="utf-8")
                 return {"tool": command[0], "status": "ok", "command": command}
 
