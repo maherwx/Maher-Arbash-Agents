@@ -68,13 +68,25 @@ class ModelAdapterEvidenceTests(unittest.TestCase):
         self.assertIn("validated_evidence", user_context)
         self.assertIn("prior_agent_evidence", user_context)
 
-    def test_missing_model_is_reported_as_planning_only(self):
+    def test_missing_model_is_reported_as_local_deterministic(self):
         with patch.dict(os.environ, {"MAHER_MODEL_URL": "", "MAHER_MODEL_ID": ""}):
             adapter = LocalModelAdapter()
             result = adapter.analyze({"id": "reviewer", "mission": "Review"}, {"inventory": {}})
-        self.assertEqual(adapter.mode, "planning_only")
+        self.assertEqual(adapter.mode, "local_deterministic")
         self.assertEqual(result["status"], "planned")
         self.assertTrue(any("not executed" in note for note in result["evidence_notes"]))
+
+    def test_non_loopback_model_endpoint_is_never_used(self):
+        with patch.dict(os.environ, {
+            "MAHER_MODEL_URL": "https://api.example.invalid/v1/chat/completions",
+            "MAHER_MODEL_ID": "remote-model",
+        }), patch("maher_bounty.model_adapter.urllib.request.urlopen") as open_url:
+            adapter = LocalModelAdapter()
+            result = adapter.analyze({"id": "reviewer", "mission": "Review"}, {"inventory": {}})
+        self.assertFalse(adapter.enabled)
+        self.assertEqual(adapter.mode, "local_deterministic")
+        open_url.assert_not_called()
+        self.assertTrue(any("external or cloud" in note for note in result["evidence_notes"]))
 
 
 if __name__ == "__main__":
