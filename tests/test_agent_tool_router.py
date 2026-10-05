@@ -105,10 +105,10 @@ class AgentToolRouterTests(unittest.TestCase):
                 [target], td,
                 scope={"assets": [target], "out_of_scope": []},
             )
+            target_lines = Path(execute.call_args.args[0][2]).read_text(encoding="utf-8").splitlines()
         self.assertEqual(discover.call_args.kwargs["preferred_tool"], "ffuf")
         self.assertEqual(execute.call_args.args[0][0], "nuclei")
-        targets_path = Path(execute.call_args.args[0][2])
-        self.assertEqual(targets_path.read_text(encoding="utf-8").splitlines(), [fresh])
+        self.assertEqual(target_lines, [fresh])
         self.assertEqual(summary["new_in_scope_urls"], [fresh])
         self.assertNotIn(outside, summary["new_in_scope_urls"])
 
