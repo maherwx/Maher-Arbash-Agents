@@ -148,7 +148,12 @@ class BrowserTransport:
             raise RuntimeError("browser network budget exhausted")
         incomplete_before = self.blocked + self.failed
         page = self.pages[name]
-        page.set_default_timeout(min(self.timeout, remaining) * 1000)
+        def refresh_timeout():
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("browser run deadline exhausted")
+            page.set_default_timeout(min(self.timeout, remaining) * 1000)
+        refresh_timeout()
         page.set_extra_http_headers(spec.get("headers", {}))
         settings = spec.get("browser", {})
         if "wait_for_network_idle" in settings and type(settings["wait_for_network_idle"]) is not bool:
@@ -161,6 +166,7 @@ class BrowserTransport:
         try:
             response = page.goto(spec["url"], wait_until="domcontentloaded")
             for action in settings.get("actions", []):
+                refresh_timeout()
                 locator = page.locator(action["selector"])
                 kind = action["kind"]
                 if kind == "fill":
@@ -177,6 +183,7 @@ class BrowserTransport:
                 else:
                     raise ValueError("unsupported browser action")
             if settings.get("wait_for"):
+                refresh_timeout()
                 page.locator(settings["wait_for"]).wait_for(state="visible")
             if settings.get("wait_for_network_idle"):
                 remaining = self.deadline - time.monotonic()
@@ -187,12 +194,15 @@ class BrowserTransport:
                 raise RuntimeError("browser navigation left configured origin")
             captures = {}
             for variable, capture in settings.get("capture_dom", {}).items():
+                refresh_timeout()
                 locator = page.locator(capture["selector"])
                 value = locator.get_attribute(capture["attribute"]) if "attribute" in capture else locator.inner_text()
                 if value is None:
                     raise ValueError("missing browser capture")
                 captures[variable] = value
+            refresh_timeout()
             body = page.locator(settings.get("body_selector", "body")).inner_text()
+            refresh_timeout()
             final = main_responses[-1] if main_responses else response
             return {"status": final.status if final else 0, "body": body[:1048576],
                     "headers": {}, "truncated": len(body) > 1048576, "captured": captures,

@@ -52,7 +52,9 @@ class BrowserRuntimeTests(unittest.TestCase):
                 if self.path == "/rotate":
                     self.send_header("Set-Cookie", "session=rotated; Path=/")
                 self.end_headers()
-                if self.path == "/async-state":
+                if self.path == "/delayed-action":
+                    text = "<div>ready</div><script>setTimeout(()=>document.body.insertAdjacentHTML('beforeend','<button id=late>continue</button>'),700)</script>"
+                elif self.path == "/async-state":
                     text = "<div id=state>loading</div><script>fetch('/state-api').then(r=>r.json()).then(x=>document.querySelector('#state').textContent=x.state)</script>"
                 elif self.path == "/polling-state":
                     text = "<div>private-order-42</div><script>let n=0;let timer=setInterval(()=>{fetch('/state-api').catch(()=>{});if(++n===5)clearInterval(timer)},100)</script>"
@@ -99,6 +101,28 @@ class BrowserRuntimeTests(unittest.TestCase):
 
     def test_failed_dependency_cannot_confirm_rendered_resource_proof(self):
         self.check_incomplete_dependency("/degraded", "failed_requests")
+
+    def test_each_dom_operation_uses_remaining_run_budget(self):
+        operations = [
+            {"actions": [{"kind": "fill", "selector": "#missing", "value": "fixture"}]},
+            {"wait_for": "#missing"},
+            {"capture_dom": {"state": {"selector": "#missing"}}},
+            {"body_selector": "#missing"},
+        ]
+        for operation in operations:
+            with self.subTest(operation=operation):
+                sender = BrowserTransport({"owner": {"origin": self.origin}}, {"assets": [self.origin]}, timeout=5, interval=0)
+                try:
+                    settings = dict(operation)
+                    settings["actions"] = [{"kind": "click", "selector": "#late"}] + operation.get("actions", [])
+                    sender.deadline = time.monotonic() + 1.2
+                    started = time.monotonic()
+                    with self.assertRaises(RuntimeError):
+                        sender("owner", {"url": self.origin + "/delayed-action", "browser": settings})
+                    self.assertLess(time.monotonic() - started, 1.7)
+                    self.assertEqual(sender.count, 1)
+                finally:
+                    sender.close()
 
     def test_blocked_dependency_cannot_confirm_rendered_resource_proof(self):
         self.check_incomplete_dependency("/blocked-dependency", "blocked_requests")

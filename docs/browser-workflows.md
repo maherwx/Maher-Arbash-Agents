@@ -96,6 +96,12 @@ resource type, status and URL with query values redacted. This exposes endpoints
 reached through JavaScript and forms to the research context without replaying
 redacted URLs or asserting that a status difference is itself a vulnerability.
 
+Each form action, explicit selector wait, DOM capture and body read
+recomputes its timeout from the remaining run budget. A slow preceding action
+cannot give the next operation a fresh copy of the original run allowance.
+The transport also checks the deadline after extracting the body before
+returning evidence. This bounds Playwright waits; it is not a hard operating
+system deadline for browser startup, synchronous callbacks or cleanup.
 Real-browser CI runs the local Chromium fixture suite separately from the core
 suite. To run it locally, set `MAHER_BROWSER_TESTS=1` and execute
 `python -m unittest discover -s tests -p test_browser_runtime.py -v`.
