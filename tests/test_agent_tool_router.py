@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from maher_bounty.agent_tool_router import build_local_tool_requests, run_agent_tool_requests
+from maher_bounty.agent_tool_router import _prior_coverage, build_local_tool_requests, run_agent_tool_requests
 
 
 class AgentToolRouterTests(unittest.TestCase):
@@ -225,6 +225,35 @@ class AgentToolRouterTests(unittest.TestCase):
         execute.assert_not_called()
         self.assertEqual(summary["runs"], [])
         self.assertTrue(any(row["reason"] == "no_known_eligible_targets" for row in summary["decisions"]))
+
+
+    def test_nonzero_tool_run_is_not_treated_as_completed_coverage(self):
+        target = "https://app.example.test/"
+        coverage = _prior_coverage(
+            {"runs": [{
+                "tool": "tlsx", "status": "nonzero", "target": target,
+                "command": ["tlsx", "-u", target],
+            }]},
+            {target},
+        )
+        self.assertNotIn("https://app.example.test", coverage["tlsx"])
+
+    def test_tlsx_followup_uses_json_output_and_valid_probe_options(self):
+        target = "https://app.example.test/"
+        with tempfile.TemporaryDirectory() as td, \\
+             patch("maher_bounty.agent_tool_router.shutil.which", return_value="/usr/bin/tlsx"), \\
+             patch("maher_bounty.agent_tool_router._exec", return_value={"tool": "tlsx", "status": "ok"}) as execute:
+            run_agent_tool_requests(
+                [{"agent": "tls_reviewer", "tool_requests": [{
+                    "tool": "tlsx", "targets": [target], "reason": "inspect certificate metadata",
+                }]}],
+                [target], td,
+                scope={"assets": [target], "out_of_scope": []},
+            )
+        command = execute.call_args.args[0]
+        self.assertIn("-json", command)
+        self.assertNotIn("-san", command)
+        self.assertNotIn("-cn", command)
 
 
 if __name__ == "__main__":
