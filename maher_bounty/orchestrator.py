@@ -14,7 +14,8 @@ from .persistence import ResearchStore
 from .native_engines import run_native_engines
 from .tool_orchestration import collect_target_inventory
 from .active_testing import run_active_testing, _dedupe
-from .agent_tool_router import run_agent_tool_requests, build_local_tool_requests
+from .agent_tool_router import build_local_tool_requests
+from .agent_feedback import run_agent_tool_feedback as run_agent_tool_requests
 from .scope_policy import scope_seed_targets
 from .traffic_ingest import ingest_traffic
 from .burp_evidence import build_scoped_traffic_evidence, build_traffic_target_references
