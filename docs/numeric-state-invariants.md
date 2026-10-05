@@ -32,3 +32,17 @@ application's business rules: configure bounds that match its intended policy.
 The HTTP engine compares response JSON. The browser engine compares its returned
 representation, which must contain valid JSON for these assertions to work;
 an arbitrary rendered HTML page requires DOM assertions or capture instead.
+
+To use a DOM value as a numeric bound, explicitly opt into numeric capture:
+
+```json
+{"capture_dom": {"initial_balance": {"selector": "#balance", "type": "number"}}}
+```
+
+An optional `attribute` reads an attribute instead of visible text. Numeric
+capture accepts at most128 characters in JSON number syntax, strips surrounding
+whitespace, and requires a finite number. Currency labels, grouping separators,
+booleans and quoted numbers are rejected. Default capture remains exact text.
+Capture failure makes the workflow inconclusive and stops dependent steps;
+cleanup still follows its configured best-effort policy. Values are retained in
+memory for substitution, not copied into the workflow evidence.

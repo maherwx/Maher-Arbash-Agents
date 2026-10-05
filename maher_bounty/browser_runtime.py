@@ -6,8 +6,24 @@ from urllib.parse import urljoin
 from http.cookies import SimpleCookie
 
 from .scope_policy import is_in_scope_url
-from .workflow_execution import _origin, _protected_headers, _validate_browser_settings, _validate_proxy, _wait_for_interval
+from .workflow_execution import _origin, _protected_headers, _validate_browser_settings, _validate_proxy, _wait_for_interval, _decode_json, _finite_number
 from .burp_evidence import _safe_url
+
+
+def _capture_value(value, capture):
+    if value is None:
+        raise ValueError("missing browser capture")
+    if capture.get("type", "text") == "text":
+        return value
+    if not isinstance(value, str) or len(value) > 128:
+        raise ValueError("numeric DOM capture requires bounded JSON number text")
+    try:
+        number = _decode_json(value.strip())
+    except (ValueError, TypeError, RecursionError):
+        raise ValueError("invalid numeric DOM capture") from None
+    if not _finite_number(number):
+        raise ValueError("numeric DOM capture requires a finite number")
+    return number
 
 
 class BrowserTransport:
@@ -205,9 +221,7 @@ class BrowserTransport:
                 refresh_timeout()
                 locator = page.locator(capture["selector"])
                 value = locator.get_attribute(capture["attribute"]) if "attribute" in capture else locator.inner_text()
-                if value is None:
-                    raise ValueError("missing browser capture")
-                captures[variable] = value
+                captures[variable] = _capture_value(value, capture)
             refresh_timeout()
             body = page.locator(settings.get("body_selector", "body")).inner_text()
             refresh_timeout()
