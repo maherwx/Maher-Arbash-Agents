@@ -240,21 +240,20 @@ class AgentToolRouterTests(unittest.TestCase):
 
     def test_tlsx_followup_uses_json_output_and_valid_probe_options(self):
         target = "https://app.example.test/"
-        with tempfile.TemporaryDirectory() as td, \\
-             patch("maher_bounty.agent_tool_router.shutil.which", return_value="/usr/bin/tlsx"), \\
-             patch("maher_bounty.agent_tool_router._exec", return_value={"tool": "tlsx", "status": "ok"}) as execute:
-            run_agent_tool_requests(
-                [{"agent": "tls_reviewer", "tool_requests": [{
-                    "tool": "tlsx", "targets": [target], "reason": "inspect certificate metadata",
-                }]}],
-                [target], td,
-                scope={"assets": [target], "out_of_scope": []},
-            )
+        with tempfile.TemporaryDirectory() as td:
+            with patch("maher_bounty.agent_tool_router.shutil.which", return_value="/usr/bin/tlsx"):
+                with patch("maher_bounty.agent_tool_router._exec", return_value={"tool": "tlsx", "status": "ok"}) as execute:
+                    run_agent_tool_requests(
+                        [{"agent": "tls_reviewer", "tool_requests": [{
+                            "tool": "tlsx", "targets": [target], "reason": "inspect certificate metadata",
+                        }]}],
+                        [target], td,
+                        scope={"assets": [target], "out_of_scope": []},
+                    )
         command = execute.call_args.args[0]
         self.assertIn("-json", command)
         self.assertNotIn("-san", command)
         self.assertNotIn("-cn", command)
-
 
 if __name__ == "__main__":
     unittest.main()
