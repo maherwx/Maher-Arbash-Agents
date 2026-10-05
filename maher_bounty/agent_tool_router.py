@@ -14,6 +14,7 @@ from .scope_policy import filter_in_scope_urls
 SUPPORTED_AGENT_TOOLS = {
     "hakrawler", "katana", "httpx", "nuclei", "dalfox", "zap-baseline.py",
     "nikto", "nmap", "tlsx", "whatweb", "wafw00f", "dnsx", "naabu", "ffuf", "gobuster",
+    "subfinder", "assetfinder", "waybackurls", "gau",
 }
 MAX_AGENT_REQUESTS = 8
 MAX_AGENT_TARGETS = 30
@@ -21,13 +22,14 @@ MAX_HAKRAWLER_ORIGINS = 2
 MAX_ZAP_ORIGINS = 2
 MAX_FOLLOWUP_ORIGINS = 2
 
-ORIGIN_TOOLS = {"hakrawler", "katana", "nikto", "zap-baseline.py", "whatweb", "wafw00f", "tlsx", "ffuf", "gobuster"}
-HOST_TOOLS = {"nmap", "naabu", "dnsx"}
+ORIGIN_TOOLS = {"hakrawler", "katana", "nikto", "zap-baseline.py", "whatweb", "wafw00f", "tlsx", "ffuf", "gobuster", "httpx"}
+HOST_TOOLS = {"nmap", "naabu", "dnsx", "subfinder", "assetfinder", "waybackurls", "gau"}
 
 
 def _coverage_key(tool: str, url: str) -> str:
     if tool in HOST_TOOLS:
-        return (urlparse(url).hostname or "").lower()
+        parsed = urlparse(url if "://" in url else "//" + url)
+        return (parsed.hostname or url).lower()
     if tool in ORIGIN_TOOLS:
         return _origin(url)
     return url
@@ -67,6 +69,7 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
     run_rows = [
         *(active_testing.get("runs", []) if isinstance(active_testing, dict) else []),
         *((tool_plan or {}).get("runs", []) if isinstance(tool_plan, dict) else []),
+        *((tool_plan or {}).get("metadata_runs", []) if isinstance(tool_plan, dict) else []),
     ]
     for run in run_rows:
         if not isinstance(run, dict) or run.get("status") in {"missing", "skipped"}:
@@ -80,13 +83,18 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
         targets = set()
         if tool == "nuclei":
             targets.update(_read_target_file(command, "-l"))
+        elif tool == "httpx":
+            targets.update(
+                entry if "://" in entry else "https://" + entry
+                for entry in _read_target_file(command, "-l")
+            )
         elif tool == "dalfox":
             if len(command) >= 3 and command[1] == "file":
                 try:
                     targets.update(Path(command[2]).read_text(encoding="utf-8", errors="ignore").splitlines())
                 except OSError:
                     pass
-        elif tool in {"nmap", "naabu", "dnsx"}:
+        elif tool in HOST_TOOLS:
             host = run.get("target")
             if not host:
                 for flag in ("-host", "-d"):
@@ -212,7 +220,7 @@ def run_agent_tool_requests(
 
     # Agents can request deeper, complementary passes from the installed local
     # web toolkit. Each command is selected from fixed argv templates.
-    for tool in ("httpx", "katana", "whatweb", "wafw00f", "nikto", "nmap", "tlsx", "dnsx", "naabu"):
+    for tool in ("httpx", "katana", "whatweb", "wafw00f", "nikto", "nmap", "tlsx", "dnsx", "naabu", "subfinder", "assetfinder", "waybackurls", "gau"):
         targets = []
         seen_keys = set()
         for url in selected[tool]:
@@ -236,9 +244,29 @@ def run_agent_tool_requests(
             if not shutil.which(tool):
                 runs.append({"tool": tool, "status": "missing", "target": scan_url, "reason": "agent-requested tool; binary not installed"})
                 continue
+            hostname = (urlparse(scan_url).hostname or "").lower()
+            if tool in {"subfinder", "assetfinder", "waybackurls", "gau"}:
+                if tool == "subfinder":
+                    command = [tool, "-silent", "-d", hostname]
+                elif tool == "assetfinder":
+                    command = [tool, "--subs-only", hostname]
+                elif tool == "waybackurls":
+                    command = [tool, hostname]
+                else:
+                    command = [tool, "--subs", hostname]
+                output = root / f"{tool}-followup-{index}.txt"
+                result = _exec(command, timeout=240, output=output)
+                result["target"] = scan_url
+                runs.append(result)
+                if output.exists():
+                    lines = [line.strip() for line in output.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
+                    candidates = ["https://" + line for line in lines] if tool in {"subfinder", "assetfinder"} else lines
+                    scoped, _ = filter_in_scope_urls(candidates, scope)
+                    new_crawl_urls.extend(url for url in scoped if url not in known)
+                continue
             if tool == "dnsx":
                 command = [tool, "-silent", "-a", "-resp"]
-                result = _exec(command, timeout=180, input_text=(urlparse(scan_url).hostname or "") + "\n")
+                result = _exec(command, timeout=180, input_text=hostname + "\n")
                 result["target"] = scan_url
                 runs.append(result)
                 continue
