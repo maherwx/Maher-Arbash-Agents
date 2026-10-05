@@ -33,6 +33,10 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+class InconsistentAccessEvidence(RuntimeError):
+    """Repeated forbidden resource proofs disagree."""
+
+
 def _validate_proxy(proxy):
     if proxy is None:
         return None
@@ -603,9 +607,12 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                     hit = all(c["passed"] for c in checks)
                     hits.append(hit)
                     rows.append({"identity": name, "role": "denied", "repeat": repeat,
-                                 **_observation(response, checks), "differential": compare_responses(control, response)})
+                                 **_observation(response, checks), "resource_proof_passed": hit,
+                                 "differential": compare_responses(control, response)})
                     if response.get("truncated") or response.get("network_incomplete"):
                         raise RuntimeError("incomplete denied resource evidence")
+                if any(hits) and not all(hits):
+                    raise InconsistentAccessEvidence("forbidden resource proof changed across repeats")
                 if all(hits):
                     findings.append({"source": "workflow_execution", "title": f"Access policy violated: {case['id']} ({name})",
                                      "target": _safe_url(case["request"]["url"]), "severity": "high", "validated": True,
