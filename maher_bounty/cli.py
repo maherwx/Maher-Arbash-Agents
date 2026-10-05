@@ -44,6 +44,7 @@ def main():
     r.add_argument("--rules", required=True)
     r.add_argument("--out", default="reports")
     r.add_argument("--inventory", default=None, help="Normalized inventory.json to feed the research engine")
+    r.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
     r.add_argument("--authorized", action="store_true", help="Confirm permission for active checks against the supplied scope")
 
     auto = s.add_parser("auto-run", help="Collect target inventory and run the full collaborative pipeline")
@@ -51,6 +52,7 @@ def main():
     auto.add_argument("--authorized", action="store_true", help="Confirm you own or have explicit permission to test this target")
     auto.add_argument("--rules", default=None, help="Optional rules YAML; safe defaults are used when omitted")
     auto.add_argument("--out", default="results/auto")
+    auto.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
 
     inv = s.add_parser("inventory", help="Normalize and deduplicate collected recon data")
     inv.add_argument("result_dir")
@@ -125,25 +127,38 @@ def main():
         print(json.dumps(write_status(_service_config(a)), indent=2))
         return
     if a.cmd == "run":
-        result = run(a.scope, a.rules, a.out, a.inventory, authorized=a.authorized)
+        result = run(
+            a.scope, a.rules, a.out, a.inventory, authorized=a.authorized,
+            **({"traffic_path": a.traffic} if a.traffic else {}),
+        )
         active = result.get("active_testing", {})
         status = active.get("status", "completed" if active else "skipped")
         findings = active.get("unique_findings", len(active.get("findings", [])))
         validation = result.get("validated_evidence", {}).get("counts", {})
+        execution = result.get("agent_execution", {})
         print(
-            f"Completed {result['agent_count']} agent passes; active_testing={status}; "
-            f"candidate_findings={findings}; evidence_backed={validation.get('evidence_backed', 0)}; "
+            f"Agent roles={execution.get('configured_roles', result.get('agent_count', 0))}; "
+            f"model_mode={execution.get('mode', 'unknown')}; "
+            f"model_analyzed={execution.get('successful_model_analyses', 0)}; "
+            f"roles_skipped_without_model={execution.get('roles_skipped_without_local_model', 0)}; "
+            f"tool_followups={execution.get('tool_followup_runs', 0)}/{execution.get('tool_followup_requests', 0)}; "
+            f"active_testing={status}; candidate_findings={findings}; "
+            f"evidence_backed={validation.get('evidence_backed', 0)}; "
             f"needs_review={validation.get('needs_review', 0)}. Reports: {a.out}"
         )
         return
     if a.cmd == "auto-run":
-        result = run_target(a.target, a.rules, a.out, authorized=a.authorized)
+        result = run_target(
+            a.target, a.rules, a.out, authorized=a.authorized,
+            **({"traffic_path": a.traffic} if a.traffic else {}),
+        )
         active = result.get("active_testing", {})
         validation = result.get("validated_evidence", {}).get("counts", {})
         print(json.dumps({
             "target": a.target,
             "inventory_counts": result.get("inventory_counts", {}),
-            "agent_count": result.get("agent_count", 0),
+            "agent_roles_configured": result.get("agent_execution", {}).get("configured_roles", result.get("agent_count", 0)),
+            "agent_execution": result.get("agent_execution", {}),
             "active_discovery_enabled": result.get("tool_plan", {}).get("active_discovery_enabled", False),
             "active_testing_status": active.get("status", "completed" if active else "skipped"),
             "candidate_findings_count": active.get("unique_findings", len(active.get("findings", []))),

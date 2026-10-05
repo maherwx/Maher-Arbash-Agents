@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 import json
 import os
@@ -12,9 +13,13 @@ from .knowledge_graph import build_application_graph
 from .persistence import ResearchStore
 from .native_engines import run_native_engines
 from .tool_orchestration import collect_target_inventory
-from .active_testing import run_active_testing
+from .active_testing import run_active_testing, _dedupe
+from .agent_tool_router import run_agent_tool_requests, build_local_tool_requests
 from .scope_policy import scope_seed_targets
+from .traffic_ingest import ingest_traffic
+from .burp_evidence import build_scoped_traffic_evidence, build_traffic_target_references
 from .advanced_analysis import build_application_intelligence, normalize_evidence, validate_evidence, build_agent_workstreams, write_advanced_artifacts
+from .advanced_web_tools import run_advanced_web_tools
 
 
 def load_agents():
@@ -95,7 +100,7 @@ def active_discovery_enabled(rules: dict, *, authorized: bool) -> bool:
     return bool(authorized) if configured is None else bool(configured)
 
 
-def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None, *, authorized=False):
+def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None, *, authorized=False, traffic_path=None):
     if not rules.get("authorization_required", True):
         raise SystemExit("rules.yaml must keep authorization_required=true")
     active_enabled = active_discovery_enabled(rules, authorized=authorized)
@@ -119,6 +124,29 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             if seeds:
                 print(f"[recon] Collecting inventory for {len(seeds)} scope seed(s)", flush=True)
                 inventory = _collect_scope_inventory(scope, rules, target, out / "recon")
+        traffic_target_refs = {}
+        traffic_evidence = {
+            "source": "burp_or_har_import", "records": [], "record_count": 0,
+            "out_of_scope_records_filtered": 0, "truncated": False,
+            "advanced_analysis": {},
+        }
+        if traffic_path:
+            imported_traffic = ingest_traffic(traffic_path, kind="auto")
+            traffic_evidence = build_scoped_traffic_evidence(imported_traffic, scope)
+            traffic_target_refs = build_traffic_target_references(imported_traffic, scope)
+            allowed_traffic_urls = set(traffic_target_refs.values())
+            scoped_traffic = [row for row in imported_traffic if row.get("url") in allowed_traffic_urls]
+            advanced_analysis = run_advanced_web_tools(scoped_traffic)
+            traffic_evidence["advanced_analysis"] = advanced_analysis
+            (out / "advanced-traffic-tools.json").write_text(
+                json.dumps(advanced_analysis, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            store.checkpoint(run_id, "advanced_web_tools", advanced_analysis)
+            (out / "burp-traffic-evidence.json").write_text(
+                json.dumps(traffic_evidence, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            store.checkpoint(run_id, "burp_traffic_evidence", traffic_evidence)
+
         active_testing = {"status": "skipped", "reason": "allow_active_discovery=false", "findings": []}
         if active_enabled:
             print("[active] Testing all authorized assets discovered in scope", flush=True)
@@ -156,29 +184,124 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         model = LocalModelAdapter()
         agents = load_agents()
         waves = build_waves(agents)
-        print(f"[agents] Starting {len(agents)} agents in {len(waves)} collaboration waves", flush=True)
         results = []
         wave_summary = []
-        for wave_index, wave in enumerate(waves, start=1):
-            print(f"[agents] Wave {wave_index}/{len(waves)}: {len(wave)} agents", flush=True)
-            prior_evidence = evidence_bus(results)
-            current = []
-            for agent in wave:
-                result = model.analyze(agent, {
-                    "scope": scope, "rules": rules, "inventory": context_inventory,
-                    "architecture_topology": topology, "application_graph": graph,
-                    "application_intelligence": intelligence, "agent_workstreams": workstreams,
-                    "validated_evidence": validation, "native_engine_analysis": native,
-                    "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
-                    "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
-                    "research_directives": directives,
-                    "research_method": {"mode": "collaborative_evidence_driven", "wave": wave_index, "principles": directives["directives"]},
-                })
-                current.append(result)
-                store.add_evidence(run_id, result.get("agent", "unknown"), "agent_result", result)
-            results.extend(current)
-            wave_summary.append({"wave": wave_index, "agents": [r.get("agent") for r in current], "shared_evidence_packets_after_wave": len(evidence_bus(results))})
-            store.checkpoint(run_id, f"wave_{wave_index}", current)
+        if model.enabled:
+            print(f"[agents] Running {len(agents)} specialist roles in {len(waves)} collaboration waves; mode={model.mode}", flush=True)
+            for wave_index, wave in enumerate(waves, start=1):
+                print(f"[agents] Wave {wave_index}/{len(waves)}: {len(wave)} agents", flush=True)
+                prior_evidence = evidence_bus(results)
+                current = []
+                for agent in wave:
+                    result = model.analyze(agent, {
+                        "scope": scope, "rules": rules, "inventory": context_inventory,
+                        "architecture_topology": topology, "application_graph": graph,
+                        "application_intelligence": intelligence, "agent_workstreams": workstreams,
+                        "validated_evidence": validation, "native_engine_analysis": native,
+                        "traffic_evidence": traffic_evidence,
+                        "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
+                        "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
+                        "research_directives": directives,
+                        "research_method": {"mode": "collaborative_evidence_driven", "wave": wave_index, "principles": directives["directives"]},
+                    })
+                    current.append(result)
+                    store.add_evidence(run_id, result.get("agent", "unknown"), "agent_result", result)
+                results.extend(current)
+                wave_summary.append({"wave": wave_index, "agents": [r.get("agent") for r in current], "shared_evidence_packets_after_wave": len(evidence_bus(results))})
+                store.checkpoint(run_id, f"wave_{wave_index}", current)
+        else:
+            print(
+                f"[agents] Local model unavailable; skipped {len(agents)} LLM analyses. "
+                "The deterministic local tool coordinator remains available.",
+                flush=True,
+            )
+
+        followup_summary = {"mode": "not_run", "runs": [], "findings": [], "decisions": []}
+        local_tool_plan = {"agent_results": [], "request_count": 0, "mode": "not_run"}
+        if active_enabled:
+            known_followup_urls = [
+                *active_testing.get("discovered_in_scope_urls", []),
+                *traffic_target_refs.values(),
+            ]
+            local_tool_plan = build_local_tool_requests(
+                known_followup_urls,
+                scope=scope,
+                active_testing=active_testing,
+                tool_plan=inventory.get("tool_plan", {}),
+            )
+            followup_summary = run_agent_tool_requests(
+                [*results, *local_tool_plan["agent_results"]],
+                known_followup_urls,
+                out / "active" / "agent-followups",
+                scope=scope,
+                active_testing=active_testing,
+                tool_plan=inventory.get("tool_plan", {}),
+                target_references=traffic_target_refs,
+            )
+            followup_summary["planner_mode"] = (
+                "local_model_plus_deterministic_coordinator" if model.enabled
+                else "local_deterministic_coordinator"
+            )
+            followup_summary["deterministic_plan"] = {
+                key: value for key, value in local_tool_plan.items() if key != "agent_results"
+            }
+            active_testing["agent_tool_followups"] = followup_summary
+            (out / "active" / "agent-followups.json").write_text(
+                json.dumps(followup_summary, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            store.checkpoint(run_id, "agent_tool_followups", followup_summary)
+            if followup_summary.get("findings"):
+                active_testing["findings"] = _dedupe([
+                    *active_testing.get("findings", []),
+                    *followup_summary["findings"],
+                ])
+                normalized = normalize_evidence(active_testing)
+                validation = validate_evidence(normalized)
+                workstreams = build_agent_workstreams(intelligence, validation)
+                write_advanced_artifacts(out / "intelligence", intelligence, validation, workstreams)
+                store.checkpoint(run_id, "validated_evidence_after_followups", validation)
+                review_ids = {"evidence_reviewer", "false_positive_reviewer", "reproducibility_reviewer"}
+                prior_evidence = evidence_bus(results)
+                followup_reviews = []
+                if model.enabled:
+                    for reviewer in agents:
+                        if reviewer.get("id") not in review_ids:
+                            continue
+                        review = model.analyze(reviewer, {
+                            "scope": scope, "rules": rules, "inventory": context_inventory,
+                            "architecture_topology": topology, "application_graph": graph,
+                            "application_intelligence": intelligence, "agent_workstreams": workstreams,
+                            "validated_evidence": validation, "native_engine_analysis": native,
+                            "traffic_evidence": traffic_evidence,
+                            "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
+                            "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
+                            "research_directives": directives,
+                            "research_method": {"mode": "followup_evidence_review", "principles": directives["directives"]},
+                        })
+                        results.append(review)
+                        followup_reviews.append(review)
+                        store.add_evidence(run_id, review.get("agent", "unknown"), "followup_review", review)
+                store.checkpoint(run_id, "followup_reviews", followup_reviews)
+        else:
+            active_testing["agent_tool_followups"] = {
+                **followup_summary,
+                "reason": "active testing is disabled by the authorized run configuration",
+            }
+
+        agent_status_counts = Counter(str(row.get("status", "unknown")) for row in results)
+        agent_execution = {
+            "mode": model.mode,
+            "configured_roles": len(agents),
+            "analysis_calls": len(results),
+            "successful_model_analyses": sum(1 for row in results if row.get("status") not in {"planned", "model_error"}),
+            "planning_only": agent_status_counts.get("planned", 0),
+            "roles_skipped_without_local_model": len(agents) if not model.enabled else 0,
+            "model_errors": agent_status_counts.get("model_error", 0),
+            "tool_followup_mode": followup_summary.get("planner_mode", "not_run"),
+            "tool_followup_requests": followup_summary.get("request_count", 0),
+            "tool_followup_runs": len(followup_summary.get("runs", [])),
+            "status_counts": dict(agent_status_counts),
+        }
 
         print("[report] Reviewing findings and building report bundle", flush=True)
         reviewed_findings = review_findings(results)
@@ -187,29 +310,37 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "run_id": run_id, "scope": scope, "rules": rules,
             "inventory_counts": inventory.get("counts", {}),
             "inventory_source": source_file, "tool_plan": inventory.get("tool_plan", {}),
-            "active_testing": active_testing, "application_intelligence": intelligence,
+            "active_testing": active_testing, "burp_traffic_evidence": traffic_evidence,
+            "application_intelligence": intelligence,
             "validated_evidence": validation, "agent_workstreams": workstreams,
             "hypothesis_count": len(hypotheses), "hypotheses": hypotheses,
             "application_graph_stats": graph.get("stats", {}), "native_engines": native,
-            "collaboration_waves": wave_summary, "agent_count": len(results), "results": results,
+            "collaboration_waves": wave_summary, "agent_count": len(results),
+            "agent_execution": agent_execution, "results": results,
         }
         build_report_bundle(out, payload, reviewed_findings, topology)
         (out / "application-graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
         store.finish(run_id)
-        print(f"[done] Completed {len(results)} agent passes. Reports: {out}", flush=True)
+        print(
+            f"[done] Agent analysis mode={agent_execution['mode']} "
+            f"model_analyzed={agent_execution['successful_model_analyses']} "
+            f"planning_only={agent_execution['planning_only']} "
+            f"model_errors={agent_execution['model_errors']}. Reports: {out}",
+            flush=True,
+        )
         return payload
     except Exception:
         store.finish(run_id, "failed")
         raise
 
 
-def run(scope_path, rules_path, out_dir="reports", inventory_path=None, *, authorized=False):
+def run(scope_path, rules_path, out_dir="reports", inventory_path=None, *, authorized=False, traffic_path=None):
     scope = yaml.safe_load(Path(scope_path).read_text(encoding="utf-8"))
     rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8"))
-    return _run_loaded(scope, rules, out_dir, inventory_path, authorized=authorized)
+    return _run_loaded(scope, rules, out_dir, inventory_path, authorized=authorized, traffic_path=traffic_path)
 
 
-def run_target(target: str, rules_path: str | None = None, out_dir="results/auto", *, authorized=False):
+def run_target(target: str, rules_path: str | None = None, out_dir="results/auto", *, authorized=False, traffic_path=None):
     if not authorized:
         raise SystemExit("auto-run requires --authorized to confirm permission for this target")
     rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8")) if rules_path else {
@@ -218,4 +349,4 @@ def run_target(target: str, rules_path: str | None = None, out_dir="results/auto
         "no_persistence": True, "report_evidence": True,
         "allow_active_discovery": True,
     }
-    return _run_loaded({"program": "Authorized target assessment", "assets": [target], "out_of_scope": []}, rules, out_dir, target=target, authorized=True)
+    return _run_loaded({"program": "Authorized target assessment", "assets": [target], "out_of_scope": []}, rules, out_dir, target=target, authorized=True, traffic_path=traffic_path)

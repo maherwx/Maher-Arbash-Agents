@@ -17,7 +17,10 @@ def build_flow_graph(ir: dict) -> dict:
     changed=True; rounds=0; limit=max(1,len(functions)*2)
     while changed and rounds<limit:
         changed=False; rounds+=1
-        for fid,item in summaries.items():
+        # Process callees before callers when possible so long call chains
+        # reach their fixpoint in a small number of passes.
+        for fid in reversed(summaries):
+            item=summaries[fid]
             before=(len(item["transitive_reads"]),len(item["transitive_writes"]))
             for callee in item["callees"]:
                 target=summaries[callee]; item["transitive_reads"].update(target["transitive_reads"]); item["transitive_writes"].update(target["transitive_writes"])
