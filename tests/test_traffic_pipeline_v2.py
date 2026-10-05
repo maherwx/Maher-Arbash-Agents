@@ -33,8 +33,8 @@ class TrafficPipelineV2Tests(unittest.TestCase):
             self.assertEqual(result["schema_version"], "2.3")
             self.assertIn("protocols", result)
             self.assertEqual(set(result["advanced_web_tools"]), {
-                "request_surface", "auth_boundary", "response_posture",
-                "parameter_behavior", "workflow_transitions",
+                "request_surface", "auth_boundary", "identity_differential",
+                "response_posture", "parameter_behavior", "workflow_transitions",
             })
             self.assertIn("workflow", result)
             self.assertIn("test_matrix", result)

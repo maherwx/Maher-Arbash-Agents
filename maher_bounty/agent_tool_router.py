@@ -71,8 +71,11 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
         *((tool_plan or {}).get("runs", []) if isinstance(tool_plan, dict) else []),
         *((tool_plan or {}).get("metadata_runs", []) if isinstance(tool_plan, dict) else []),
     ]
+    # Failed, blocked, missing, and timed-out runs count as attempts too.
+    # A later run can retry after the recorded cause is fixed.
+    attempted_statuses = {"ok", "nonzero", "timeout", "blocked", "missing"}
     for run in run_rows:
-        if not isinstance(run, dict) or run.get("status") != "ok":
+        if not isinstance(run, dict) or run.get("status") not in attempted_statuses:
             continue
         tool = str(run.get("tool") or "").strip().lower()
         if tool not in covered:

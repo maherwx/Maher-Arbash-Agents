@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter, defaultdict
@@ -193,6 +194,68 @@ def compare_auth_boundaries(records: list[dict]) -> dict:
     return {"tool": "auth_boundary_differential", "candidate_count": len(candidates), "candidates": candidates[:2000]}
 
 
+def compare_actor_resource_access(records: list[dict]) -> dict:
+    """Find same-resource responses observed under multiple captured identities.
+
+    This is offline traffic analysis. It does not replay requests or assert an
+    authorization flaw; it creates review candidates from the supplied captures.
+    """
+    grouped = defaultdict(lambda: defaultdict(set))
+    displays = {}
+    for record in records[:20000]:
+        identity = str(record.get("identity") or "")
+        if not identity:
+            continue
+        parsed = urlsplit(str(record.get("url") or ""))
+        if not parsed.scheme or not parsed.netloc:
+            continue
+        method = str(record.get("method") or "GET").upper()
+        # Keep the exact path only as an in-memory join key; publish the
+        # already-redacted route family and never publish query values.
+        resource_key = (method, parsed.netloc.lower(), parsed.path or "/")
+        actor = "actor-" + hashlib.sha256(identity.encode("utf-8", errors="replace")).hexdigest()[:10]
+        displays[resource_key] = (method, _route(record))
+        grouped[resource_key][actor].add(_response_signature(record))
+
+    candidates = []
+    comparisons = []
+    for resource_key, actors in sorted(grouped.items()):
+        if len(actors) < 2:
+            continue
+        method, route = displays[resource_key]
+        actor_rows = []
+        successful = []
+        all_statuses = set()
+        all_shapes = set()
+        for actor, signatures in sorted(actors.items()):
+            statuses = sorted({sig[0] for sig in signatures if sig[0] is not None})
+            actor_rows.append({"actor": actor, "status_codes": statuses, "response_shapes": len(signatures)})
+            all_statuses.update(statuses)
+            all_shapes.update(signatures)
+            if any(status is not None and 200 <= status < 400 for status in statuses):
+                successful.append(actor)
+        if len(successful) >= 2:
+            candidates.append({
+                "route_family": route, "method": method,
+                "identity_count": len(actors), "successful_identity_count": len(successful),
+                "status_codes": sorted(all_statuses),
+                "classification": "shared_success_requires_authorization_review",
+                "status": "manual_review",
+                "reason": "the same exact path returned a success-class response under multiple captured identities; ownership and intended sharing are unknown",
+                "next_step": "compare the returned object ownership using dedicated in-scope test accounts before reporting",
+            })
+        comparisons.append({
+            "route_family": route, "method": method, "identity_count": len(actors),
+            "actors": actor_rows, "distinct_response_shapes": len(all_shapes),
+            "classification": "shared_success_requires_authorization_review" if len(successful) >= 2 else "identity_response_difference",
+            "status": "manual_review",
+        })
+    return {
+        "tool": "multi_identity_resource_differential",
+        "candidate_count": len(candidates), "comparison_count": len(comparisons),
+        "candidates": candidates[:2000], "comparisons": comparisons[:2000],
+    }
+
 def audit_response_posture(records: list[dict]) -> dict:
     expected = ("content-security-policy", "x-content-type-options", "referrer-policy", "permissions-policy")
     host_rows = defaultdict(lambda: {"https": False, "requests": 0, "header_presence": Counter(), "signals": []})
@@ -294,6 +357,7 @@ def run_advanced_web_tools(records: list[dict]) -> dict:
     return {
         "request_surface": map_request_surface(records),
         "auth_boundary": compare_auth_boundaries(records),
+        "identity_differential": compare_actor_resource_access(records),
         "response_posture": audit_response_posture(records),
         "parameter_behavior": correlate_parameter_behavior(records),
         "workflow_transitions": model_workflow_transitions(records),
