@@ -49,6 +49,47 @@ class AgentToolRouterTests(unittest.TestCase):
         self.assertEqual(command[-1], route)
         self.assertEqual(summary["runs"][0]["target"], route)
 
+    def test_reuses_passive_subfinder_coverage_from_inventory(self):
+        target = "https://app.example.test/"
+        plan = {"runs": [{
+            "tool": "subfinder", "status": "ok",
+            "command": ["subfinder", "-silent", "-d", "app.example.test"],
+        }]}
+        with tempfile.TemporaryDirectory() as td, \
+             patch("maher_bounty.agent_tool_router.shutil.which", return_value="/usr/bin/tool"), \
+             patch("maher_bounty.agent_tool_router._exec") as execute:
+            summary = run_agent_tool_requests(
+                [{"agent": "domain_reviewer", "tool_requests": [{
+                    "tool": "subfinder", "targets": [target],
+                }]}],
+                [target], td,
+                scope={"assets": [target], "out_of_scope": []},
+                tool_plan=plan,
+            )
+        execute.assert_not_called()
+        self.assertTrue(any(
+            row.get("reason") == "already_covered_in_base_scan"
+            for row in summary["decisions"]
+        ))
+
+    def test_naabu_uses_fixed_scoped_host_profile(self):
+        target = "https://app.example.test/account"
+        with tempfile.TemporaryDirectory() as td, \
+             patch("maher_bounty.agent_tool_router.shutil.which", return_value="/usr/bin/tool"), \
+             patch("maher_bounty.agent_tool_router._exec", return_value={"tool": "naabu", "status": "ok"}) as execute:
+            run_agent_tool_requests(
+                [{"agent": "network_reviewer", "tool_requests": [{
+                    "tool": "naabu", "targets": [target],
+                }]}],
+                [target], td,
+                scope={"assets": ["https://app.example.test"], "out_of_scope": []},
+            )
+        command = execute.call_args.args[0]
+        self.assertEqual(command[:2], ["naabu", "-host"])
+        self.assertEqual(command[2], "app.example.test")
+        self.assertIn("100", command)
+        self.assertIn("10", command)
+
     def test_ffuf_discovery_is_scope_filtered_then_drives_new_url_scan(self):
         target = "https://app.example.test/"
         fresh = "https://app.example.test/new-route"
