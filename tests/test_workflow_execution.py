@@ -104,6 +104,22 @@ class WorkflowExecutionTests(unittest.TestCase):
         self.assertEqual(result["requests"], 1)
         self.assertFalse(result["findings"])
 
+    def test_truncated_denied_response_is_inconclusive_not_completed(self):
+        for repeat in [1, 2]:
+            for body in ['{"id":42,"owner":"owner"}', '{}']:
+                with self.subTest(repeat=repeat, body=body):
+                    calls = {}
+                    def sender(name, request):
+                        calls[name] = calls.get(name, 0) + 1
+                        return {"status": 200, "body": body if name == "other" else '{"id":42,"owner":"owner"}',
+                                "truncated": name == "other" and calls[name] == repeat}
+                    result = self.run_case(sender=sender)
+                    self.assertEqual(result["status"], "partial")
+                    self.assertEqual(result["decisions"][0]["status"], "inconclusive")
+                    self.assertEqual(result["requests"], 2 + repeat)
+                    self.assertFalse(result["findings"])
+                    self.assertTrue(result["observations"][0]["observations"][-1]["truncated"])
+
     def test_scope_and_origin_fail_before_requests(self):
         for url in ["https://outside.test/orders/42", "http://app.example.test/orders/42", "https://app.example.test:8443/orders/42"]:
             config = manifest()
@@ -168,6 +184,38 @@ class WorkflowExecutionTests(unittest.TestCase):
 
 
 class LiveWorkflowTransportTests(unittest.TestCase):
+    def test_real_bounded_denied_body_cannot_complete_access_case(self):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+            def do_GET(self):
+                body = b"private-order-42"
+                if self.headers.get("X-Fixture-Role") != "owner":
+                    body += b"x" * 100
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        config = manifest(f"http://127.0.0.1:{server.server_port}")
+        config["access_cases"][0]["proof"] = {"contains": ["private-order-42"]}
+        try:
+            sender = Transport(config["identities"], max_bytes=32, interval=0)
+            sender.headers["owner"]["X-Fixture-Role"] = "owner"
+            result = WorkflowExecutionTests().run_case(config, sender)
+            self.assertEqual(result["status"], "partial")
+            self.assertEqual(result["requests"], 3)
+            self.assertFalse(result["findings"])
+            row = result["observations"][0]["observations"][-1]
+            self.assertTrue(row["truncated"])
+            self.assertTrue(all(check["passed"] for check in row["assertions"]))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+
     def test_real_http_isolated_cookie_jars_and_redirect_not_followed(self):
         seen = []
         class Handler(BaseHTTPRequestHandler):

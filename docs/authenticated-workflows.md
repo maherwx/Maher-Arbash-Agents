@@ -45,6 +45,10 @@ the first failed assertion. Access matrices use GET/HEAD and repeat allowed and
 denied observations twice. A repeatable forbidden response matching the explicit
 resource proof is evidence-backed. A generic HTTP 200, login page, invalid
 baseline, truncated body, or network failure cannot confirm forbidden access.
+Truncation on either an allowed control or a denied observation stops that
+access case as inconclusive and makes the overall result partial. The captured
+observation remains in evidence; a size-limited response is not a completed
+policy check even when the resource marker is present in its retained prefix.
 Workflow invariant failures require impact review; they are not automatically
 confirmed security findings. JSON assertions use JSON Pointer syntax.
 JSON proofs compare booleans separately from numbers, including inside nested
