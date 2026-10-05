@@ -1,4 +1,5 @@
 import importlib.util
+import asyncio
 import json
 import os
 import tempfile
@@ -55,6 +56,8 @@ class BrowserRuntimeTests(unittest.TestCase):
                     text = "<div id=state>loading</div><script>fetch('/state-api').then(r=>r.json()).then(x=>document.querySelector('#state').textContent=x.state)</script>"
                 elif self.path == "/polling-state":
                     text = "<div>private-order-42</div><script>let n=0;let timer=setInterval(()=>{fetch('/state-api').catch(()=>{});if(++n===5)clearInterval(timer)},100)</script>"
+                elif self.path == "/continuous-polling":
+                    text = "<div>private-order-42</div><script>setInterval(()=>fetch('/state-api').catch(()=>{}),100)</script>"
                 elif self.path in {"/degraded", "/blocked-dependency"}:
                     dependency = "/broken?token=secret-fixture" if self.path == "/degraded" else "http://localhost:" + str(self.server.server_port) + "/outside"
                     text = "<div>private-order-42</div><script>fetch('" + dependency + "').catch(()=>{}).finally(()=>document.body.insertAdjacentHTML('beforeend','<div id=done>done</div>'))</script>"
@@ -145,6 +148,39 @@ class BrowserRuntimeTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertFalse(result["findings"])
         self.assertLess(time.monotonic() - started, 7)
+
+    def test_continuous_polling_cleanup_has_no_async_callback_errors(self):
+        config = {"engine": "browser", "limits": {"timeout_seconds": 1, "total_seconds": 4, "interval_seconds": 0.1},
+                  "identities": {"owner": {"origin": self.origin}},
+                  "workflows": [{"id": "polling-cleanup", "identity": "owner", "steps": [
+                      {"request": {"url": self.origin + "/continuous-polling", "browser": {"wait_for_network_idle": True}},
+                       "expect": {"contains": ["private-order-42"]}}]},
+                      {"id": "fresh-context", "identity": "owner", "steps": [
+                          {"request": {"url": self.origin + "/check"}, "expect": {"contains": ["anonymous"]}}]}]}
+        errors = []
+        started = time.monotonic()
+        with patch.object(asyncio.BaseEventLoop, "call_exception_handler", side_effect=lambda context: errors.append(context)):
+            result = self.execute(config)
+        self.assertEqual(result["status"], "partial")
+        self.assertFalse(result["findings"])
+        self.assertEqual(result["decisions"][1]["status"], "completed")
+        self.assertFalse(errors, [e.get("message") for e in errors])
+        self.assertLess(time.monotonic() - started, 8)
+
+    def test_context_reset_and_repeated_close_dispose_old_session(self):
+        sender = BrowserTransport({"owner": {"origin": self.origin}}, {"assets": [self.origin]}, timeout=1)
+        old = sender.contexts["owner"]
+        sender.reset("owner")
+        self.assertIsNot(old, sender.contexts["owner"])
+        sender.close()
+        sender.close()
+        self.assertFalse(sender.contexts)
+        self.assertFalse(sender.pages)
+        self.assertFalse(sender.pending)
+        with self.assertRaises(RuntimeError):
+            sender.reset("owner")
+        with self.assertRaises(RuntimeError):
+            sender("owner", {"url": self.origin})
 
     def test_form_login_cookie_isolation_and_dom_capture(self):
         config = {"engine": "browser", "identities": {name: {"origin": self.origin} for name in ["owner", "other"]},
