@@ -19,13 +19,13 @@ class AdvancedWebToolsTests(unittest.TestCase):
         records = [
             {
                 "source": "har", "url": "https://api.example.test/api/items/42?sort=asc&token=secret-query",
-                "method": "GET", "status": 403, "sequence": 1, "identity": "",
+                "method": "GET", "status": 403, "sequence": 1, "identity": "actor-secret",
                 "request_raw": har_message({"Accept": "application/json"}),
                 "response_raw": har_message({"Content-Type": "application/json"}, '{"error":"private-message"}', 403),
             },
             {
                 "source": "burp", "url": "https://api.example.test/api/items/42?sort=desc&token=other-secret",
-                "method": "GET", "status": 200, "sequence": 2, "identity": "credential-secret",
+                "method": "GET", "status": 200, "sequence": 2, "identity": "actor-secret",
                 "request_raw": har_message({"Cookie": "session=credential-secret", "Accept": "application/json"}),
                 "response_raw": har_message({
                     "Content-Type": "application/json",
@@ -53,7 +53,7 @@ class AdvancedWebToolsTests(unittest.TestCase):
         self.assertGreaterEqual(result["workflow_transitions"]["transition_count"], 1)
 
         serialized = json.dumps(result)
-        for secret in ("secret-query", "other-secret", "credential-secret", "private-message", "private-cookie", "private-response"):
+        for secret in ("secret-query", "other-secret", "credential-secret", "actor-secret", "private-message", "private-cookie", "private-response"):
             self.assertNotIn(secret, serialized)
 
     def test_surface_routes_hide_url_credentials_and_opaque_path_tokens(self):
