@@ -31,6 +31,33 @@ class BurpEvidenceTests(unittest.TestCase):
         self.assertNotIn("set-cookie", row["response_header_names"])
         self.assertNotIn("secret", str(result))
 
+    def test_har_json_traffic_does_not_leak_header_or_body_values(self):
+        import json
+
+        record = {
+            "source": "har",
+            "url": "https://app.example.test/items?token=private",
+            "method": "POST",
+            "request_raw": json.dumps({
+                "headers": [
+                    {"name": "Authorization", "value": "Bearer secret"},
+                    {"name": "X-Trace", "value": "trace-secret"},
+                ],
+                "postData": {"text": "private body"},
+            }),
+            "response_raw": json.dumps({
+                "headers": [{"name": "Set-Cookie", "value": "sid=secret"}],
+                "content": {"text": "private response"},
+            }),
+        }
+        result = build_scoped_traffic_evidence(
+            [record], {"assets": ["https://app.example.test"], "out_of_scope": []}
+        )
+        self.assertEqual(result["records"][0]["request_header_names"], ["x-trace"])
+        self.assertNotIn("private body", str(result))
+        self.assertNotIn("secret", str(result))
+        self.assertTrue(result["records"][0]["request_body_present"])
+
 
 if __name__ == "__main__":
     unittest.main()
