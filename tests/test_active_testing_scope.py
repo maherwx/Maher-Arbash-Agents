@@ -72,5 +72,23 @@ class ActiveTestingScopeTests(unittest.TestCase):
         self.assertIn("https://admin.example.test/", result["scope_review"]["rejected_urls"])
 
 
+    def test_tlsx_uses_json_output_without_conflicting_probe_flags(self):
+        commands = []
+
+        def fake_exec(cmd, *, timeout, output=None):
+            commands.append(cmd)
+            return {"tool": cmd[0], "status": "missing", "command": cmd}
+
+        inventory = {"endpoints": [{"value": "https://app.example.test/"}]}
+        scope = {"assets": ["https://app.example.test/"], "out_of_scope": []}
+        with tempfile.TemporaryDirectory() as temp, patch("maher_bounty.active_testing._exec", side_effect=fake_exec):
+            run_active_testing("https://app.example.test/", inventory, temp, scope=scope)
+
+        command = next(cmd for cmd in commands if cmd[0] == "tlsx")
+        self.assertIn("-json", command)
+        self.assertNotIn("-san", command)
+        self.assertNotIn("-cn", command)
+
+
 if __name__ == "__main__":
     unittest.main()
