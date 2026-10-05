@@ -66,6 +66,22 @@ the page finished its required network operations; use explicit wait selectors
 appropriate to the application. Late activity after observation is not covered.
 Direct browser calls reject credential-header overrides and exhausted budgets.
 After rate-limit delays the deadline is checked again before fetching traffic.
+
+For pages that update state through asynchronous requests, set
+`"browser":{"wait_for_network_idle":true}` on a step. After actions and the
+optional application wait selector, this waits for Playwright's network-idle
+state (no active network connections for at least 500 ms), bounded by the
+per-operation timeout and remaining run deadline. A busy polling page may never
+reach this state; timeout produces an inconclusive workflow, not a policy
+finding. Application readiness selectors remain necessary when activity starts
+later or state updates are scheduled independently of network traffic.
+
+Each identity tracks its own in-flight requests. Observations record their count
+as `pending_requests`; any outstanding request at the snapshot makes the
+network evidence incomplete. Resetting an identity installs a new tracker with
+its new context, so old-context completion callbacks cannot alter the new
+session's tracker. The network-idle option must be a JSON boolean and is
+validated before starting traffic.
 The summary also retains a sanitized network timeline: identity, HTTP method,
 resource type, status and URL with query values redacted. This exposes endpoints
 reached through JavaScript and forms to the research context without replaying

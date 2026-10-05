@@ -26,3 +26,12 @@ class IncompleteNetworkEvidenceTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["requests"], 1)
         self.assertFalse(result["findings"])
+
+    def test_malformed_network_wait_option_is_rejected_before_traffic(self):
+        origin = "https://app.example.test"
+        config = {"engine": "browser", "identities": {"owner": {"origin": origin}},
+                  "workflows": [{"id": "wait", "identity": "owner", "steps": [
+                      {"request": {"url": origin, "browser": {"wait_for_network_idle": "false"}},
+                       "expect": {"statuses": [200]}}]}]}
+        with self.assertRaises(ValueError):
+            self.execute(config, lambda *_: self.fail("must not send requests"))

@@ -106,6 +106,7 @@ def _observation(response, checks):
     return {"status": response["status"], "body_sha256": hashlib.sha256(body).hexdigest(),
             "body_bytes": len(body), "truncated": response.get("truncated", False), "assertions": checks,
             "network_incomplete": response.get("network_incomplete", False),
+            "pending_requests": response.get("pending_requests", 0),
             "representation": "rendered_dom" if response.get("browser_derived") else "http_body"}
 
 
@@ -197,6 +198,9 @@ def validate_manifest(manifest, scope):
                 raise ValueError("workflow step requires a known identity")
             requests.append((step.get("request", {}), name))
     for request, name in requests:
+        settings = request.get("browser", {})
+        if "wait_for_network_idle" in settings and type(settings["wait_for_network_idle"]) is not bool:
+            raise ValueError("wait_for_network_idle must be a boolean")
         url = request.get("url", "")
         if not is_in_scope_url(url, scope) or urlparse(url).fragment:
             raise ValueError("request URL is outside scope or contains a fragment")

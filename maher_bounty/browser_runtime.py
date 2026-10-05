@@ -24,6 +24,7 @@ class BrowserTransport:
         self.count, self.blocked, self.failed = 0, 0, 0
         self.transactions = []
         self.contexts, self.pages = {}, {}
+        self.pending = {}
         self._pw = sync_playwright().start()
         self.browser = None
         try:
@@ -95,6 +96,11 @@ class BrowserTransport:
         context = self.browser.new_context(extra_http_headers=headers, storage_state=state,
                                            service_workers="block", accept_downloads=False)
         self.contexts[name] = context
+        pending = set()
+        self.pending[name] = pending
+        context.on("request", lambda request: pending.add(request))
+        context.on("requestfinished", lambda request: pending.discard(request))
+        context.on("requestfailed", lambda request: pending.discard(request))
         if cookies:
             context.add_cookies(cookies)
         context.set_default_timeout(self.timeout * 1000)
@@ -120,6 +126,8 @@ class BrowserTransport:
         page.set_default_timeout(min(self.timeout, remaining) * 1000)
         page.set_extra_http_headers(spec.get("headers", {}))
         settings = spec.get("browser", {})
+        if "wait_for_network_idle" in settings and type(settings["wait_for_network_idle"]) is not bool:
+            raise ValueError("wait_for_network_idle must be a boolean")
         main_responses = []
         def observed(response):
             if response.request.is_navigation_request() and response.request.frame == page.main_frame:
@@ -145,6 +153,11 @@ class BrowserTransport:
                     raise ValueError("unsupported browser action")
             if settings.get("wait_for"):
                 page.locator(settings["wait_for"]).wait_for(state="visible")
+            if settings.get("wait_for_network_idle"):
+                remaining = self.deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("browser run deadline exhausted")
+                page.wait_for_load_state("networkidle", timeout=min(self.timeout, remaining) * 1000)
             if not self._allowed(name, page.url):
                 raise RuntimeError("browser navigation left configured origin")
             captures = {}
@@ -158,7 +171,8 @@ class BrowserTransport:
             final = main_responses[-1] if main_responses else response
             return {"status": final.status if final else 0, "body": body[:1048576],
                     "headers": {}, "truncated": len(body) > 1048576, "captured": captures,
-                    "network_incomplete": self.blocked + self.failed > incomplete_before,
+                    "pending_requests": len(self.pending[name]),
+                    "network_incomplete": self.blocked + self.failed > incomplete_before or bool(self.pending[name]),
                     "browser_derived": True}
         except self.error_type:
             raise RuntimeError("browser operation failed or timed out") from None
