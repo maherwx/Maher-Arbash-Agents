@@ -72,7 +72,7 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
         *((tool_plan or {}).get("metadata_runs", []) if isinstance(tool_plan, dict) else []),
     ]
     for run in run_rows:
-        if not isinstance(run, dict) or run.get("status") not in {"ok", "nonzero"}:
+        if not isinstance(run, dict) or run.get("status") != "ok":
             continue
         tool = str(run.get("tool") or "").strip().lower()
         if tool not in covered:
@@ -281,8 +281,6 @@ def run_agent_tool_requests(
             parsed = urlparse(url)
             if tool == "dalfox" and not parsed.query:
                 continue
-            if tool == "dalfox" and not parsed.query:
-                continue
             if tool == "tlsx" and parsed.scheme.lower() != "https":
                 continue
             coverage_key = _coverage_key(tool, url)
@@ -433,7 +431,7 @@ def run_agent_tool_requests(
                 hostname = (urlparse(scan_url).hostname or "").lower()
                 command = [tool, "-sV", "-Pn", "--top-ports", "100", hostname]
             else:  # TLSX; URL scope and HTTPS scheme are checked above.
-                command = [tool, "-u", scan_url, "-silent", "-san", "-cn"]
+                command = [tool, "-u", scan_url, "-silent", "-json"]
             result = _exec(command, timeout=300)
             result["target"] = scan_url
             runs.append(result)
