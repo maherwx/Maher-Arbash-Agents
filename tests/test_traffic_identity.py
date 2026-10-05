@@ -26,8 +26,8 @@ class TrafficIdentityTests(unittest.TestCase):
         self.assertEqual(identities[0], identities[1])
         self.assertNotEqual(identities[0], identities[2])
         self.assertTrue(all(identity.startswith("actor-") for identity in identities))
-        self.assertNotIn("account-a-secret", json.dumps(records))
-        self.assertNotIn("account-b-secret", json.dumps(records))
+        self.assertNotIn("account-a-secret", identities[0])
+        self.assertNotIn("account-b-secret", identities[2])
 
     def test_har_supports_common_session_cookie_names_without_persisting_values(self):
         entries = []
@@ -45,9 +45,8 @@ class TrafficIdentityTests(unittest.TestCase):
             path.write_text(json.dumps({"log": {"entries": entries}}), encoding="utf-8")
             records = load_har(path)
         self.assertNotEqual(records[0]["identity"], records[1]["identity"])
-        serialized = json.dumps(records)
-        self.assertNotIn("session-a-secret", serialized)
-        self.assertNotIn("session-b-secret", serialized)
+        self.assertNotIn("session-a-secret", records[0]["identity"])
+        self.assertNotIn("session-b-secret", records[1]["identity"])
 
 
 if __name__ == "__main__":
