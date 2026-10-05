@@ -70,12 +70,19 @@ def _json_equal(actual, expected):
     return actual == expected
 
 
-def _json_value(body, pointer):
-    value = json.loads(body, object_pairs_hook=_json_pairs, parse_constant=_invalid_json_constant, parse_float=_json_float)
+def _decode_json(body):
+    return json.loads(body, object_pairs_hook=_json_pairs, parse_constant=_invalid_json_constant, parse_float=_json_float)
+
+
+def _validate_pointer(pointer):
+    if not isinstance(pointer, str) or (pointer and not pointer.startswith("/")) or re.search(r"~(?![01])", pointer):
+        raise ValueError("invalid JSON Pointer")
+
+
+def _pointer_value(value, pointer):
+    _validate_pointer(pointer)
     if pointer == "":
         return value
-    if not pointer.startswith("/"):
-        raise ValueError("JSON pointer must be empty or start with /")
     for part in pointer[1:].split("/"):
         part = part.replace("~1", "/").replace("~0", "~")
         if isinstance(value, list):
@@ -87,6 +94,10 @@ def _json_value(body, pointer):
     return value
 
 
+def _json_value(body, pointer):
+    return _pointer_value(_decode_json(body), pointer)
+
+
 def _assertions(response, expected):
     checks = []
     if "statuses" in expected:
@@ -95,12 +106,29 @@ def _assertions(response, expected):
         checks.append({"kind": "contains", "passed": marker in response["body"]})
     for marker in expected.get("absent", []):
         checks.append({"kind": "absent", "passed": marker not in response["body"]})
+    json_valid, document = False, None
+    if expected.get("json_equals") or expected.get("json_absent"):
+        try:
+            document = _decode_json(response["body"])
+            json_valid = True
+        except (ValueError, TypeError, RecursionError):
+            pass
     for pointer, wanted in expected.get("json_equals", {}).items():
         try:
-            passed = _json_equal(_json_value(response["body"], pointer), wanted)
+            passed = json_valid and _json_equal(_pointer_value(document, pointer), wanted)
         except (ValueError, KeyError, IndexError, TypeError, RecursionError):
             passed = False
         checks.append({"kind": "json_equals", "pointer": pointer, "passed": passed})
+    for pointer in expected.get("json_absent", []):
+        passed = False
+        if json_valid:
+            try:
+                _pointer_value(document, pointer)
+            except (KeyError, IndexError):
+                passed = True
+            except (ValueError, TypeError, RecursionError):
+                pass
+        checks.append({"kind": "json_absent", "pointer": pointer, "passed": passed})
     return checks
 
 
@@ -114,7 +142,7 @@ def _observation(response, checks):
 
 
 def _validate_expectation(expected):
-    supported = {"statuses", "contains", "absent", "json_equals"}
+    supported = {"statuses", "contains", "absent", "json_equals", "json_absent"}
     if not isinstance(expected, dict) or not expected or set(expected) - supported:
         raise ValueError("expectations require supported assertion keys")
     count = 0
@@ -138,6 +166,15 @@ def _validate_expectation(expected):
         except (ValueError, TypeError, RecursionError):
             raise ValueError("json_equals requires finite JSON values") from None
         count += len(values)
+        for pointer in values:
+            _validate_pointer(pointer)
+    if "json_absent" in expected:
+        pointers = expected["json_absent"]
+        if not isinstance(pointers, list) or not pointers:
+            raise ValueError("json_absent requires a nonempty JSON Pointer list")
+        for pointer in pointers:
+            _validate_pointer(pointer)
+        count += len(pointers)
     if not count:
         raise ValueError("expectations require at least one actual assertion")
 
@@ -196,6 +233,13 @@ def validate_manifest(manifest, scope):
             if not step.get("expect"):
                 raise ValueError("every workflow step requires expected behavior")
             _validate_expectation(step["expect"])
+            captures = step.get("capture", {})
+            if not isinstance(captures, dict):
+                raise ValueError("capture requires a JSON Pointer mapping")
+            for variable, pointer in captures.items():
+                if not isinstance(variable, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", variable):
+                    raise ValueError("invalid capture variable name")
+                _validate_pointer(pointer)
             name = step.get("identity", workflow["identity"])
             if name not in identities:
                 raise ValueError("workflow step requires a known identity")
@@ -461,8 +505,10 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                                      "basis": "explicit invariant failed; requires impact review"})
                     decisions.append({"id": workflow["id"], "status": "invariant_failed", "step": index})
                     break
-                for variable, pointer in step.get("capture", {}).items():
-                    variables[variable] = _json_value(response["body"], pointer)
+                if step.get("capture"):
+                    document = _decode_json(response["body"])
+                    for variable, pointer in step["capture"].items():
+                        variables[variable] = _pointer_value(document, pointer)
                 variables.update(response.get("captured", {}))
             else:
                 decisions.append({"id": workflow["id"], "status": "completed"})

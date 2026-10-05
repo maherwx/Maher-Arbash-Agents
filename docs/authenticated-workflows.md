@@ -53,6 +53,23 @@ remain equivalent. Responses with duplicate object keys or nonfinite numbers
 cannot provide JSON proof or captured state. Array pointers require canonical
 nonnegative indices; negative indices and leading zeros are rejected.
 
+Use `"json_absent":["/private_token"]` in a workflow expectation to require a
+field to be missing from a valid JSON document. A present `null` value does not
+count as absent. Missing object keys or canonical array indices beyond the array
+length count as absent; malformed JSON, invalid pointers and traversal through
+a non-container do not. Pair absence checks with expected status and known
+resource/state fields, for example
+`"expect":{"statuses":[200],"json_equals":{"/state":"revoked","/id":"{{id}}"},"json_absent":["/private_token"]}`.
+This tests payload state, not whether a previously issued credential is unusable;
+that requires a separate explicit application policy check. Absence alone cannot
+serve as a resource-specific access-matrix proof.
+
+JSON Pointer escapes must use `~0` for `~` and `~1` for `/`. Invalid escapes and
+JSON capture mappings are rejected before traffic. Capture variable names follow
+the `{{variable}}` identifier syntax: letters/underscore first, then letters,
+digits or underscores. JSON is decoded once for each assertion set and once for
+each capture set, rather than repeatedly for every selected field.
+
 Each workflow step may specify `"identity":"other"` to override the workflow's
 default identity. Only configured identities are accepted, and every request is
 validated against that step's identity origin before and after substitution.
