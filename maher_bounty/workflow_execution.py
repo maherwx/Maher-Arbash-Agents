@@ -302,10 +302,20 @@ def _resolve(value, variables, *, url=False):
     return re.sub(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}", replace, value)
 
 
+def _template_variables(value):
+    if isinstance(value, dict):
+        return set().union(*(_template_variables(item) for item in value.values()))
+    if isinstance(value, list):
+        return set().union(*(_template_variables(item) for item in value))
+    if isinstance(value, str):
+        return set(re.findall(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}", value))
+    return set()
+
+
 def validate_manifest(manifest, scope):
-    _validate_limits(manifest.get("limits", {}))
     if not isinstance(manifest, dict):
         raise ValueError("workflow manifest must be an object")
+    _validate_limits(manifest.get("limits", {}))
     if manifest.get("engine", "http") not in ("http", "browser"):
         raise ValueError("workflow engine must be http or browser")
     _validate_proxy(manifest.get("proxy"))
@@ -342,6 +352,10 @@ def validate_manifest(manifest, scope):
         names.add(workflow["id"])
         if workflow.get("identity") not in identities or not workflow.get("steps"):
             raise ValueError("workflow requires a known identity and ordered steps")
+        initial = workflow.get("variables", {})
+        if not isinstance(initial, dict) or any(not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) for key in initial):
+            raise ValueError("workflow variables require valid named values")
+        available = set(initial)
         for step in workflow["steps"]:
             if not step.get("expect"):
                 raise ValueError("every workflow step requires expected behavior")
@@ -353,6 +367,16 @@ def validate_manifest(manifest, scope):
                 if not isinstance(variable, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", variable):
                     raise ValueError("invalid capture variable name")
                 _validate_pointer(pointer)
+            request = step.get("request", {})
+            settings = request.get("browser", {})
+            _validate_browser_settings(settings)
+            dom_captures = settings.get("capture_dom", {})
+            if set(captures) & set(dom_captures):
+                raise ValueError("a step cannot capture the same variable from JSON and DOM")
+            if (_template_variables(request) | _template_variables(step["expect"])) - available:
+                raise ValueError("workflow uses a variable before initialization or an earlier capture")
+            available.update(captures)
+            available.update(dom_captures)
             name = step.get("identity", workflow["identity"])
             if name not in identities:
                 raise ValueError("workflow step requires a known identity")
