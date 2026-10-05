@@ -49,6 +49,23 @@ class AgentToolRouterTests(unittest.TestCase):
         self.assertEqual(command[-1], route)
         self.assertEqual(summary["runs"][0]["target"], route)
 
+    def test_burp_reference_runs_exact_url_without_exposing_value_to_model(self):
+        exact_url = "https://app.example.test/search?token=secret-value"
+        reference = "local-ref-1"
+        with tempfile.TemporaryDirectory() as td, \
+             patch("maher_bounty.agent_tool_router.shutil.which", return_value="/usr/bin/tool"), \
+             patch("maher_bounty.agent_tool_router._exec", return_value={"tool": "whatweb", "status": "ok"}) as execute:
+            run_agent_tool_requests(
+                [{"agent": "traffic_reviewer", "tool_requests": [{
+                    "tool": "whatweb", "target_refs": [reference],
+                }]}],
+                [exact_url], td,
+                scope={"assets": ["https://app.example.test"], "out_of_scope": []},
+                target_references={reference: exact_url},
+            )
+        command = execute.call_args.args[0]
+        self.assertEqual(command[-1], exact_url)
+
     def test_reuses_nmap_host_coverage_from_base_run(self):
         route = "https://app.example.test/profile"
         active = {"runs": [{
