@@ -146,7 +146,7 @@ def _in_scope_unique(values, scope: dict, *, target: str | None = None) -> list[
     return allowed
 
 
-def _directory_discovery(scan_target: str, host_dir: Path, runs: list[dict]) -> list[str]:
+def _directory_discovery(scan_target: str, host_dir: Path, runs: list[dict], *, preferred_tool: str | None = None) -> list[str]:
     parsed = urlparse(scan_target)
     if parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
         runs.append({"tool": "ffuf/gobuster", "status": "skipped", "target": scan_target, "reason": "only origin URLs are eligible for content discovery"})
@@ -154,7 +154,15 @@ def _directory_discovery(scan_target: str, host_dir: Path, runs: list[dict]) -> 
     wordlist = host_dir / "safe-content-paths.txt"
     wordlist.write_text("\n".join(SAFE_CONTENT_PATHS) + "\n", encoding="utf-8")
     output_urls = []
-    if shutil.which("ffuf"):
+    ffuf_ready = bool(shutil.which("ffuf"))
+    gobuster_ready = bool(shutil.which("gobuster"))
+    if preferred_tool == "ffuf" and not ffuf_ready:
+        runs.append({"tool": "ffuf", "status": "missing", "target": scan_target, "reason": "requested directory tool is not installed"})
+        return []
+    if preferred_tool == "gobuster" and not gobuster_ready:
+        runs.append({"tool": "gobuster", "status": "missing", "target": scan_target, "reason": "requested directory tool is not installed"})
+        return []
+    if preferred_tool == "ffuf" or (preferred_tool is None and ffuf_ready):
         output = host_dir / "ffuf.json"
         runs.append(_exec([
             "ffuf", "-w", str(wordlist), "-u", scan_target.rstrip("/") + "/FUZZ",
@@ -168,7 +176,7 @@ def _directory_discovery(scan_target: str, host_dir: Path, runs: list[dict]) -> 
                 output_urls.extend(row.get("url") for row in data.get("results", []) if isinstance(row, dict) and row.get("url"))
             except (OSError, json.JSONDecodeError):
                 pass
-    elif shutil.which("gobuster"):
+    elif preferred_tool == "gobuster" or (preferred_tool is None and gobuster_ready):
         output = host_dir / "gobuster.txt"
         runs.append(_exec([
             "gobuster", "dir", "-u", scan_target, "-w", str(wordlist),
