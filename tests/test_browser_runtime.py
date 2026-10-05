@@ -26,6 +26,16 @@ class BrowserRuntimeTests(unittest.TestCase):
                 if self.path.split("?")[0] == "/broken":
                     self.connection.close()
                     return
+                if self.path == "/state-api":
+                    time.sleep(0.25)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    try:
+                        self.wfile.write(b'{"state":"settled-state-42"}')
+                    except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                        pass
+                    return
                 if self.path == "/external-redirect":
                     self.send_response(302)
                     self.send_header("Location", "http://localhost:" + str(self.server.server_port) + "/credential-leak")
@@ -41,7 +51,11 @@ class BrowserRuntimeTests(unittest.TestCase):
                 if self.path == "/rotate":
                     self.send_header("Set-Cookie", "session=rotated; Path=/")
                 self.end_headers()
-                if self.path in {"/degraded", "/blocked-dependency"}:
+                if self.path == "/async-state":
+                    text = "<div id=state>loading</div><script>fetch('/state-api').then(r=>r.json()).then(x=>document.querySelector('#state').textContent=x.state)</script>"
+                elif self.path == "/polling-state":
+                    text = "<div>private-order-42</div><script>let n=0;let timer=setInterval(()=>{fetch('/state-api').catch(()=>{});if(++n===5)clearInterval(timer)},100)</script>"
+                elif self.path in {"/degraded", "/blocked-dependency"}:
                     dependency = "/broken?token=secret-fixture" if self.path == "/degraded" else "http://localhost:" + str(self.server.server_port) + "/outside"
                     text = "<div>private-order-42</div><script>fetch('" + dependency + "').catch(()=>{}).finally(()=>document.body.insertAdjacentHTML('beforeend','<div id=done>done</div>'))</script>"
                 elif self.path == "/login":
@@ -109,6 +123,28 @@ class BrowserRuntimeTests(unittest.TestCase):
             self.assertEqual(self.seen, [])
         finally:
             sender.close()
+
+    def test_network_idle_observes_async_state_before_proof(self):
+        config = {"engine": "browser", "identities": {"owner": {"origin": self.origin}},
+                  "workflows": [{"id": "settle", "identity": "owner", "steps": [
+                      {"request": {"url": self.origin + "/async-state", "browser": {"wait_for_network_idle": True}},
+                       "expect": {"contains": ["settled-state-42"]}}]}]}
+        result = self.execute(config)
+        self.assertEqual(result["status"], "completed")
+        self.assertFalse(result["findings"])
+        self.assertEqual(result["observations"][0]["observations"][0]["pending_requests"], 0)
+
+    def test_busy_network_cannot_wait_past_budget_or_confirm_stale_dom(self):
+        config = {"engine": "browser", "limits": {"timeout_seconds": 1, "total_seconds": 3, "interval_seconds": 0.1},
+                  "identities": {"owner": {"origin": self.origin}},
+                  "workflows": [{"id": "polling", "identity": "owner", "steps": [
+                      {"request": {"url": self.origin + "/polling-state", "browser": {"wait_for_network_idle": True}},
+                       "expect": {"contains": ["private-order-42"]}}]}]}
+        started = time.monotonic()
+        result = self.execute(config)
+        self.assertEqual(result["status"], "partial")
+        self.assertFalse(result["findings"])
+        self.assertLess(time.monotonic() - started, 7)
 
     def test_form_login_cookie_isolation_and_dom_capture(self):
         config = {"engine": "browser", "identities": {name: {"origin": self.origin} for name in ["owner", "other"]},
