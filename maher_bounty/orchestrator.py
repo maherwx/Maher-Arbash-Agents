@@ -284,6 +284,8 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 active_testing=active_testing,
                 tool_plan=inventory.get("tool_plan", {}),
                 target_references=traffic_target_refs,
+                checkpoint_path=out / "active" / "agent-followups" / "execution-state.json",
+                checkpoint_context=rules,
                 **({"reviewer": review_execution_round} if model.enabled else {}),
             )
             followup_summary["planner_mode"] = (
