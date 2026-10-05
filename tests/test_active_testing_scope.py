@@ -32,7 +32,7 @@ class ActiveTestingScopeTests(unittest.TestCase):
         self.assertEqual(target_lines, ["https://app.example.test", "https://app.example.test/login"])
         self.assertEqual(result["scope_review"]["rejected_url_count"], 2)
 
-    def test_active_checks_cover_all_wildcard_hosts_and_skip_exclusions(self):
+    def test_active_checks_deduplicate_same_origin_and_skip_exclusions(self):
         commands = []
 
         def fake_exec(cmd, *, timeout, output=None):
@@ -65,7 +65,7 @@ class ActiveTestingScopeTests(unittest.TestCase):
             "https://api.example.test/v1",
         ])
         katana_targets = [cmd[cmd.index("-u") + 1] for cmd in commands if cmd[0] == "katana"]
-        self.assertEqual(katana_targets, result["targets"])
+        self.assertEqual(katana_targets, ["https://app.example.test", "https://api.example.test"])
         self.assertIn("https://app.example.test/login", result["discovered_in_scope_urls"])
         self.assertIn("https://api.example.test/v1", result["discovered_in_scope_urls"])
         self.assertEqual(result["scope_review"]["rejected_url_count"], 3)
