@@ -219,5 +219,10 @@ def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
             pass
         raise
     finally:
+        if os.name == "posix":
+            # A completed parent can leave children with redirected/closed
+            # pipes. They still belong to this invocation's private group;
+            # synchronous tool completion must not leave them running.
+            _kill_tree(process)
         if job:
             job.close()
