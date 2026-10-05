@@ -26,11 +26,12 @@ def _tail(value, limit: int = 3000) -> str:
 
 def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_text: str | None = None) -> dict:
     tool = cmd[0]
+    effective_timeout = max(1, int(timeout)) + 180
     if not shutil.which(tool):
         return {"tool": tool, "status": "missing", "command": cmd, "findings": 0, "stderr_tail": ""}
-    print(f"[ACTIVE] {tool:<12} RUN timeout={timeout}s", flush=True)
+    print(f"[ACTIVE] {tool:<12} RUN timeout={effective_timeout}s (+180s tool allowance)", flush=True)
     try:
-        cp = subprocess.run(cmd, input=input_text, capture_output=True, text=True, timeout=timeout, check=False)
+        cp = subprocess.run(cmd, input=input_text, capture_output=True, text=True, timeout=effective_timeout, check=False)
         combined = (cp.stdout or "") + ("\n" + cp.stderr if cp.stderr else "")
         if output:
             output.parent.mkdir(parents=True, exist_ok=True)
@@ -43,7 +44,7 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
             diagnostic = (stderr_tail or stdout_tail).replace("\n", " ")[:400]
             print(f"[ACTIVE] {tool:<12} ERROR: {diagnostic}", flush=True)
         return {
-            "tool": tool, "status": status, "returncode": cp.returncode, "command": cmd,
+            "tool": tool, "status": status, "returncode": cp.returncode, "command": cmd, "timeout_seconds": effective_timeout,
             "output": str(output) if output else None, "stderr_tail": stderr_tail, "stdout_tail": stdout_tail,
         }
     except subprocess.TimeoutExpired as exc:
@@ -54,7 +55,7 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
             output.write_text(partial + ("\n" + stderr_tail if stderr_tail else ""), encoding="utf-8", errors="ignore")
         print(f"[ACTIVE] {tool:<12} TIMEOUT; continuing", flush=True)
         return {
-            "tool": tool, "status": "timeout", "command": cmd, "output": str(output) if output else None,
+            "tool": tool, "status": "timeout", "command": cmd, "timeout_seconds": effective_timeout, "output": str(output) if output else None,
             "stderr_tail": stderr_tail, "stdout_tail": partial[-1000:],
         }
 
