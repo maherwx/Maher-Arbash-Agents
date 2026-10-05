@@ -218,7 +218,7 @@ def _assertions(response, expected):
     for marker in expected.get("absent", []):
         checks.append({"kind": "absent", "passed": marker not in response["body"]})
     json_valid, document = False, None
-    if expected.get("json_equals") or expected.get("json_absent"):
+    if expected.get("json_equals") or expected.get("json_absent") or expected.get("json_number"):
         try:
             document = _decode_json(response["body"])
             json_valid = True
@@ -240,6 +240,18 @@ def _assertions(response, expected):
             except (ValueError, TypeError, RecursionError):
                 pass
         checks.append({"kind": "json_absent", "pointer": pointer, "passed": passed})
+    for pointer, bounds in expected.get("json_number", {}).items():
+        try:
+            actual = _pointer_value(document, pointer) if json_valid else None
+        except (ValueError, KeyError, IndexError, TypeError, RecursionError):
+            actual = None
+        for comparison, bound in bounds.items():
+            passed = False
+            if _finite_number(actual) and _finite_number(bound):
+                passed = {"gt": lambda: actual > bound, "gte": lambda: actual >= bound,
+                          "lt": lambda: actual < bound, "lte": lambda: actual <= bound}[comparison]()
+            checks.append({"kind": "json_number", "pointer": pointer,
+                           "operator": comparison, "passed": passed})
     return checks
 
 
@@ -252,8 +264,8 @@ def _observation(response, checks):
             "representation": "rendered_dom" if response.get("browser_derived") else "http_body"}
 
 
-def _validate_expectation(expected):
-    supported = {"statuses", "contains", "absent", "json_equals", "json_absent"}
+def _validate_expectation(expected, *, allow_templates=False):
+    supported = {"statuses", "contains", "absent", "json_equals", "json_absent", "json_number"}
     if not isinstance(expected, dict) or not expected or set(expected) - supported:
         raise ValueError("expectations require supported assertion keys")
     count = 0
@@ -286,6 +298,20 @@ def _validate_expectation(expected):
         for pointer in pointers:
             _validate_pointer(pointer)
         count += len(pointers)
+    if "json_number" in expected:
+        values = expected["json_number"]
+        if not isinstance(values, dict) or not values:
+            raise ValueError("json_number requires a nonempty JSON Pointer mapping")
+        for pointer, bounds in values.items():
+            _validate_pointer(pointer)
+            if not isinstance(bounds, dict) or not bounds or set(bounds) - {"gt", "gte", "lt", "lte"}:
+                raise ValueError("json_number requires gt/gte/lt/lte bounds")
+            for bound in bounds.values():
+                template = allow_templates and isinstance(bound, str) and re.fullmatch(
+                    r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}", bound)
+                if not _finite_number(bound) and not template:
+                    raise ValueError("json_number bounds must be finite numbers")
+            count += len(bounds)
     if not count:
         raise ValueError("expectations require at least one actual assertion")
 
@@ -368,7 +394,7 @@ def validate_manifest(manifest, scope):
                 raise ValueError("workflow steps must be objects")
             if not step.get("expect"):
                 raise ValueError("every workflow step requires expected behavior")
-            _validate_expectation(step["expect"])
+            _validate_expectation(step["expect"], allow_templates=True)
             captures = step.get("capture", {})
             if not isinstance(captures, dict):
                 raise ValueError("capture requires a JSON Pointer mapping")
