@@ -119,6 +119,7 @@ def run_agent_tool_requests(
     scope: dict,
     active_testing: dict | None = None,
     tool_plan: dict | None = None,
+    target_references: dict[str, str] | None = None,
 ) -> dict:
     """Run bounded, allowlisted shell-backed tool follow-ups on scoped URLs.
 
@@ -147,12 +148,25 @@ def run_agent_tool_requests(
         if not isinstance(raw_targets, list):
             raw_targets = []
         candidates = [value for value in raw_targets if isinstance(value, str)]
+        raw_refs = row.get("target_refs", [])
+        if isinstance(raw_refs, str):
+            raw_refs = [raw_refs]
+        if not isinstance(raw_refs, list):
+            raw_refs = []
+        resolved_refs = [
+            (target_references or {}).get(ref)
+            for ref in raw_refs if isinstance(ref, str)
+        ]
+        unknown_ref_count = sum(1 for value in resolved_refs if not value)
+        candidates.extend(value for value in resolved_refs if value)
         in_scope, out_scope = filter_in_scope_urls(candidates, scope)
         eligible = []
         for url in in_scope:
             if url not in known:
                 continue
             parsed = urlparse(url)
+            if tool == "dalfox" and not parsed.query:
+                continue
             if tool == "dalfox" and not parsed.query:
                 continue
             if tool == "tlsx" and parsed.scheme.lower() != "https":
@@ -166,11 +180,12 @@ def run_agent_tool_requests(
                 seen[tool].add(dedupe_key)
                 eligible.append(url)
                 target_budget -= 1
-        if out_scope or any(value not in known for value in candidates if value not in out_scope):
+        if unknown_ref_count or out_scope or any(value not in known for value in candidates if value not in out_scope):
             decisions.append({
                 "agent": row.get("agent"), "tool": tool, "status": "filtered",
                 "out_of_scope_count": len(out_scope),
                 "unknown_url_count": sum(1 for value in candidates if value not in known and value not in out_scope),
+                "unknown_target_ref_count": unknown_ref_count,
             })
         if eligible:
             selected[tool].extend(eligible)
