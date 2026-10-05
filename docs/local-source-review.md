@@ -104,8 +104,13 @@ Source artifacts are written through bounded atomic JSON replacement, using a
 private temporary file where supported, flushing before replacement. The previous
 artifact survives a serialization/size/write failure before replacement; a reader
 does not receive a half-written JSON file. Each artifact is limited to 8 MiB and
-non-finite numeric values are rejected. Both artifacts share `artifact_generation`,
-derived from the complete report content before generation fields are added.
+non-finite numeric values are rejected.
+The writer incrementally encodes JSON and stops before the accumulated UTF-8
+buffer exceeds the limit, before creating any temporary file. UTF-8 conversion
+uses bounded slices; the input object and individual JSON encoder tokens are
+not covered by this byte budget. This is not a total process memory limit.
+Both artifacts share `artifact_generation`, derived from the complete report
+content before generation fields are added.
 The main report embeds the full structure and is written last; use it as the
 authoritative snapshot. Consumers combining the separate files must compare
 generation IDs and reject mismatches. Two file replacements are not one transaction;
