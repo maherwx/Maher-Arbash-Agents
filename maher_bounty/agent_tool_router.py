@@ -16,7 +16,7 @@ SUPPORTED_AGENT_TOOLS = {
     "nikto", "nmap", "tlsx", "whatweb", "wafw00f", "dnsx", "naabu", "ffuf", "gobuster",
     "subfinder", "assetfinder", "waybackurls", "gau", "alterx",
 }
-MAX_AGENT_REQUESTS = 8
+MAX_AGENT_REQUESTS = 20
 MAX_AGENT_TARGETS = 30
 MAX_HAKRAWLER_ORIGINS = 2
 MAX_ZAP_ORIGINS = 2
