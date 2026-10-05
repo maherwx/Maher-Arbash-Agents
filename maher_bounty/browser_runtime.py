@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 from http.cookies import SimpleCookie
 
 from .scope_policy import is_in_scope_url
-from .workflow_execution import _origin
+from .workflow_execution import _origin, _protected_headers
 from .burp_evidence import _safe_url
 
 
@@ -141,7 +141,7 @@ class BrowserTransport:
             raise ValueError("browser request outside identity origin/scope")
         if spec.get("method", "GET").upper() != "GET" or "body" in spec:
             raise ValueError("browser transport navigates GET pages; use form actions for mutations")
-        if any(k.lower() in {"authorization", "cookie", "host", "proxy-authorization"} for k in spec.get("headers", {})):
+        if any(k.lower() in _protected_headers(self.identities[name]) for k in spec.get("headers", {})):
             raise ValueError("request headers cannot override identity credentials")
         remaining = self.deadline - time.monotonic()
         if remaining <= 0 or self.count >= self.budget:

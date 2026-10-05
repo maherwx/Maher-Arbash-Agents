@@ -45,6 +45,11 @@ the first failed assertion. Access matrices use GET/HEAD and repeat allowed and
 denied observations twice. A repeatable forbidden response matching the explicit
 resource proof is evidence-backed. A generic HTTP 200, login page, invalid
 baseline, truncated body, or network failure cannot confirm forbidden access.
+Request headers cannot override any header configured in the selected
+identity's `headers_env`, including custom credential or tenant headers.
+Matching is case-insensitive and enforced both before a manifest starts and
+for direct HTTP/browser transport calls. Unrelated request headers remain
+available. Supplied target credentials are separate from model-service keys.
 Truncation on either an allowed control or a denied observation stops that
 access case as inconclusive and makes the overall result partial. The captured
 observation remains in evidence; a size-limited response is not a completed

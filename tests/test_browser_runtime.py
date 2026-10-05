@@ -151,6 +151,22 @@ class BrowserRuntimeTests(unittest.TestCase):
         finally:
             sender.close()
 
+    def test_custom_identity_header_override_rejected_before_browser_network(self):
+        identities = {"owner": {"origin": self.origin, "headers_env": {"X-API-Key": "FIXTURE_BROWSER_KEY"}}}
+        with patch.dict(os.environ, {"FIXTURE_BROWSER_KEY": "fixture-key"}):
+            sender = BrowserTransport(identities, {"assets": [self.origin]})
+        try:
+            for header in ["X-API-Key", "x-api-key", "X-API-KEY"]:
+                with self.subTest(header=header), self.assertRaises(ValueError):
+                    sender("owner", {"url": self.origin + "/check", "headers": {header: "override"}})
+            self.assertEqual(sender.count, 0)
+            self.assertFalse(self.seen)
+            response = sender("owner", {"url": self.origin + "/check", "headers": {"Accept": "text/html"}})
+            self.assertEqual(response["status"], 200)
+            self.assertNotIn("fixture-key", json.dumps(sender.summary()))
+        finally:
+            sender.close()
+
     def test_network_idle_observes_async_state_before_proof(self):
         config = {"engine": "browser", "identities": {"owner": {"origin": self.origin}},
                   "workflows": [{"id": "settle", "identity": "owner", "steps": [
