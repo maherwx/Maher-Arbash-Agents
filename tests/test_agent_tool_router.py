@@ -49,6 +49,28 @@ class AgentToolRouterTests(unittest.TestCase):
         self.assertEqual(command[-1], route)
         self.assertEqual(summary["runs"][0]["target"], route)
 
+    def test_ffuf_discovery_is_scope_filtered_then_drives_new_url_scan(self):
+        target = "https://app.example.test/"
+        fresh = "https://app.example.test/new-route"
+        outside = "https://outside.example/new-route"
+        with tempfile.TemporaryDirectory() as td, \
+             patch("maher_bounty.agent_tool_router.shutil.which", return_value="/usr/bin/tool"), \
+             patch("maher_bounty.agent_tool_router._directory_discovery", return_value=[fresh, outside]) as discover, \
+             patch("maher_bounty.agent_tool_router._exec", return_value={"tool": "nuclei", "status": "ok"}) as execute:
+            summary = run_agent_tool_requests(
+                [{"agent": "route_reviewer", "tool_requests": [{
+                    "tool": "ffuf", "targets": [target], "reason": "test safe route candidates",
+                }]}],
+                [target], td,
+                scope={"assets": [target], "out_of_scope": []},
+            )
+        self.assertEqual(discover.call_args.kwargs["preferred_tool"], "ffuf")
+        self.assertEqual(execute.call_args.args[0][0], "nuclei")
+        targets_path = Path(execute.call_args.args[0][2])
+        self.assertEqual(targets_path.read_text(encoding="utf-8").splitlines(), [fresh])
+        self.assertEqual(summary["new_in_scope_urls"], [fresh])
+        self.assertNotIn(outside, summary["new_in_scope_urls"])
+
     def test_burp_reference_runs_exact_url_without_exposing_value_to_model(self):
         exact_url = "https://app.example.test/search?token=secret-value"
         reference = "local-ref-1"
