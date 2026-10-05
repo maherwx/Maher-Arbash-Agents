@@ -16,6 +16,8 @@ from .tool_orchestration import collect_target_inventory
 from .active_testing import run_active_testing, _dedupe
 from .agent_tool_router import run_agent_tool_requests
 from .scope_policy import scope_seed_targets
+from .traffic_ingest import ingest_traffic
+from .burp_evidence import build_scoped_traffic_evidence
 from .advanced_analysis import build_application_intelligence, normalize_evidence, validate_evidence, build_agent_workstreams, write_advanced_artifacts
 
 
@@ -97,7 +99,7 @@ def active_discovery_enabled(rules: dict, *, authorized: bool) -> bool:
     return bool(authorized) if configured is None else bool(configured)
 
 
-def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None, *, authorized=False):
+def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None, *, authorized=False, traffic_path=None):
     if not rules.get("authorization_required", True):
         raise SystemExit("rules.yaml must keep authorization_required=true")
     active_enabled = active_discovery_enabled(rules, authorized=authorized)
@@ -121,6 +123,18 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             if seeds:
                 print(f"[recon] Collecting inventory for {len(seeds)} scope seed(s)", flush=True)
                 inventory = _collect_scope_inventory(scope, rules, target, out / "recon")
+        traffic_evidence = {
+            "source": "burp_or_har_import", "records": [], "record_count": 0,
+            "out_of_scope_records_filtered": 0, "truncated": False,
+        }
+        if traffic_path:
+            imported_traffic = ingest_traffic(traffic_path, kind="auto")
+            traffic_evidence = build_scoped_traffic_evidence(imported_traffic, scope)
+            (out / "burp-traffic-evidence.json").write_text(
+                json.dumps(traffic_evidence, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            store.checkpoint(run_id, "burp_traffic_evidence", traffic_evidence)
+
         active_testing = {"status": "skipped", "reason": "allow_active_discovery=false", "findings": []}
         if active_enabled:
             print("[active] Testing all authorized assets discovered in scope", flush=True)
@@ -171,6 +185,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                     "architecture_topology": topology, "application_graph": graph,
                     "application_intelligence": intelligence, "agent_workstreams": workstreams,
                     "validated_evidence": validation, "native_engine_analysis": native,
+                    "traffic_evidence": traffic_evidence,
                     "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
                     "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
                     "research_directives": directives,
@@ -186,7 +201,10 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         if active_enabled and model.enabled:
             followup_summary = run_agent_tool_requests(
                 results,
-                active_testing.get("discovered_in_scope_urls", []),
+                [
+                    *active_testing.get("discovered_in_scope_urls", []),
+                    *(row.get("url") for row in traffic_evidence.get("records", [])),
+                ],
                 out / "active" / "agent-followups",
                 scope=scope,
                 active_testing=active_testing,
@@ -215,6 +233,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                         "architecture_topology": topology, "application_graph": graph,
                         "application_intelligence": intelligence, "agent_workstreams": workstreams,
                         "validated_evidence": validation, "native_engine_analysis": native,
+                        "traffic_evidence": traffic_evidence,
                         "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
                         "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
                         "research_directives": directives,
@@ -248,7 +267,8 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "run_id": run_id, "scope": scope, "rules": rules,
             "inventory_counts": inventory.get("counts", {}),
             "inventory_source": source_file, "tool_plan": inventory.get("tool_plan", {}),
-            "active_testing": active_testing, "application_intelligence": intelligence,
+            "active_testing": active_testing, "burp_traffic_evidence": traffic_evidence,
+            "application_intelligence": intelligence,
             "validated_evidence": validation, "agent_workstreams": workstreams,
             "hypothesis_count": len(hypotheses), "hypotheses": hypotheses,
             "application_graph_stats": graph.get("stats", {}), "native_engines": native,
@@ -271,13 +291,13 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         raise
 
 
-def run(scope_path, rules_path, out_dir="reports", inventory_path=None, *, authorized=False):
+def run(scope_path, rules_path, out_dir="reports", inventory_path=None, *, authorized=False, traffic_path=None):
     scope = yaml.safe_load(Path(scope_path).read_text(encoding="utf-8"))
     rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8"))
-    return _run_loaded(scope, rules, out_dir, inventory_path, authorized=authorized)
+    return _run_loaded(scope, rules, out_dir, inventory_path, authorized=authorized, traffic_path=traffic_path)
 
 
-def run_target(target: str, rules_path: str | None = None, out_dir="results/auto", *, authorized=False):
+def run_target(target: str, rules_path: str | None = None, out_dir="results/auto", *, authorized=False, traffic_path=None):
     if not authorized:
         raise SystemExit("auto-run requires --authorized to confirm permission for this target")
     rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8")) if rules_path else {
@@ -286,4 +306,4 @@ def run_target(target: str, rules_path: str | None = None, out_dir="results/auto
         "no_persistence": True, "report_evidence": True,
         "allow_active_discovery": True,
     }
-    return _run_loaded({"program": "Authorized target assessment", "assets": [target], "out_of_scope": []}, rules, out_dir, target=target, authorized=True)
+    return _run_loaded({"program": "Authorized target assessment", "assets": [target], "out_of_scope": []}, rules, out_dir, target=target, authorized=True, traffic_path=traffic_path)
