@@ -3,6 +3,7 @@ import os
 import time
 from pathlib import Path
 from urllib.parse import urljoin
+from http.cookies import SimpleCookie
 
 from .scope_policy import is_in_scope_url
 from .workflow_execution import _origin
@@ -63,17 +64,27 @@ class BrowserTransport:
             self.contexts.pop(name).close()
         identity = self.identities[name]
         headers = {}
+        cookies = []
         for header, env_name in identity.get("headers_env", {}).items():
             value = os.environ.get(env_name)
             if not value or "\r" in value or "\n" in value or header.lower() in {"host", "proxy-authorization"}:
                 raise ValueError("missing or invalid browser credential environment variable")
-            headers[header] = value
+            if header.lower() == "cookie":
+                parsed = SimpleCookie()
+                parsed.load(value)
+                if not parsed:
+                    raise ValueError("invalid browser cookie credential")
+                cookies.extend({"name": key, "value": morsel.value, "url": identity["origin"]} for key, morsel in parsed.items())
+            else:
+                headers[header] = value
         state = identity.get("storage_state")
         if state and not Path(state).is_file():
             raise ValueError("browser storage_state file is missing")
         context = self.browser.new_context(extra_http_headers=headers, storage_state=state,
                                            service_workers="block", accept_downloads=False)
         self.contexts[name] = context
+        if cookies:
+            context.add_cookies(cookies)
         context.set_default_timeout(self.timeout * 1000)
         context.route("**/*", lambda route: self._route(name, route))
         # WebSockets are not HTTP route interceptions; block them explicitly.

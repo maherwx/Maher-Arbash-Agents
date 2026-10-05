@@ -13,6 +13,9 @@ Every test identity gets a separate non-persistent browser context. Credentials
 can come from `headers_env` or an explicit Playwright `storage_state` file in
 the identity configuration; keep those files private. Workflows reset their
 context at the start and keep cookies/DOM state across ordered steps.
+Cookie credentials supplied through environment variables are imported into
+the identity's browser cookie jar. Server `Set-Cookie` rotation then updates
+that jar instead of a fixed Cookie header overriding the refreshed session.
 
 Example browser step inside an explicitly scoped workflow:
 

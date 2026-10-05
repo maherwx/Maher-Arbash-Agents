@@ -33,11 +33,15 @@ class BrowserRuntimeTests(unittest.TestCase):
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
+                if self.path == "/rotate":
+                    self.send_header("Set-Cookie", "session=rotated; Path=/")
                 self.end_headers()
                 if self.path == "/login":
                     text = "<input name='user'><button id='login'>login</button><script>document.querySelector('#login').onclick=()=>{document.cookie='session='+document.querySelector('input').value+'; path=/'; document.body.innerHTML='<div id=ready>logged in</div><input id=csrf value=token-fixture>';}</script>"
                 elif self.path.split("?")[0] == "/check":
-                    text = "<div id=state>" + ("authenticated" if self.headers.get("Cookie") == "session=owner" else "anonymous") + "</div>"
+                    text = "<div id=state>" + ("authenticated" if self.headers.get("Cookie") in {"session=owner", "session=rotated"} else "anonymous") + "</div>"
+                elif self.path == "/rotate":
+                    text = "<div>rotated</div>"
                 else:
                     text = "<div id=state>loading</div><script>setTimeout(()=>document.querySelector('#state').textContent='private-order-42',100)</script>"
                 self.wfile.write(text.encode())
@@ -102,3 +106,19 @@ class BrowserRuntimeTests(unittest.TestCase):
         result = self.execute(config)
         self.assertFalse(result["findings"])
         self.assertEqual(result["status"], "completed")
+
+    def test_supplied_cookie_credentials_rotate_without_leaking_to_other_context(self):
+        config = {"engine": "browser", "identities": {"owner": {"origin": self.origin, "headers_env": {"Cookie": "MAHER_BROWSER_COOKIE"}},
+                  "other": {"origin": self.origin}}, "workflows": [
+                      {"id": "rotation", "identity": "owner", "steps": [
+                          {"request": {"url": self.origin + "/check"}, "expect": {"contains": ["authenticated"]}},
+                          {"request": {"url": self.origin + "/rotate"}, "expect": {"contains": ["rotated"]}},
+                          {"request": {"url": self.origin + "/check"}, "expect": {"contains": ["authenticated"]}}]},
+                      {"id": "other", "identity": "other", "steps": [
+                          {"request": {"url": self.origin + "/check"}, "expect": {"contains": ["anonymous"]}}]}]}
+        with patch.dict(os.environ, {"MAHER_BROWSER_COOKIE": "session=owner"}):
+            result = self.execute(config)
+        self.assertFalse(result["findings"])
+        self.assertEqual(result["status"], "completed")
+        cookies = [cookie for path, cookie in self.seen if path == "/check"]
+        self.assertEqual(cookies, ["session=owner", "session=rotated", None])
