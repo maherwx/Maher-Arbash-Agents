@@ -16,6 +16,7 @@ from .provenance_engine import build_provenance_chains, summarize_provenance
 from .report_evidence import build_evidence_report
 from .correlation_engine import correlate_evidence
 from .persistence import ResearchStore
+from .advanced_web_tools import run_advanced_web_tools
 
 
 def _inventory_from_records(records: list[dict]) -> dict:
@@ -43,6 +44,7 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
     behavior = build_behavior_model(records)
     anomalies = cluster_transactions(canonical)
     protocols = analyze_http_records(records)
+    advanced_tools = run_advanced_web_tools(records)
     workflow = build_workflow_model(records)
     workflow_divergences = compare_identity_workflows(workflow)
     test_matrix = build_advanced_test_matrix(canonical)
@@ -62,6 +64,7 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
         "schema_version": "2.3", "source_file": str(source), "source_kind": kind,
         "record_count": len(records), "canonical_count": len(canonical),
         "behavior": behavior, "anomalies": anomalies, "protocols": protocols,
+        "advanced_web_tools": advanced_tools,
         "workflow": workflow, "workflow_divergences": workflow_divergences,
         "test_matrix": test_matrix, "priorities": priorities, "knowledge_graph": graph,
         "provenance": provenance, "provenance_summary": provenance_summary,
@@ -70,7 +73,8 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
 
     artifacts = {
         "canonical-http.json": canonical, "behavior-model.json": behavior, "anomalies.json": anomalies,
-        "protocol-intelligence.json": protocols, "workflow-model.json": workflow,
+        "protocol-intelligence.json": protocols, "advanced-web-tools.json": advanced_tools,
+        "workflow-model.json": workflow,
         "workflow-divergences.json": workflow_divergences, "test-matrix.json": test_matrix,
         "priorities.json": priorities, "knowledge-graph.json": graph, "provenance-chains.json": provenance,
         "provenance-summary.json": provenance_summary, "evidence-report.json": evidence_report,
@@ -87,6 +91,7 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
         store.checkpoint(run_id, "behavior_model", behavior)
         store.checkpoint(run_id, "anomaly_clusters", anomalies)
         store.checkpoint(run_id, "protocol_intelligence", protocols)
+        store.checkpoint(run_id, "advanced_web_tools", advanced_tools)
         store.checkpoint(run_id, "workflow_model", workflow)
         store.checkpoint(run_id, "workflow_divergences", workflow_divergences)
         store.checkpoint(run_id, "advanced_test_matrix", test_matrix)
