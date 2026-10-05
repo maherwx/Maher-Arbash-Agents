@@ -1,12 +1,40 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import Mock
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from maher_bounty.workflow_execution import _assertions, _validate_expectation, execute_workflows, validate_manifest
 
 
 class NumericInvariantTests(unittest.TestCase):
+    def test_known_invalid_bound_blocks_all_traffic(self):
+        origin = "https://app.example.test"
+        for value in [True, "10", None, float("nan"), float("inf")]:
+            config = {"identities": {"owner": {"origin": origin}}, "workflows": [{
+                "id": "balance", "identity": "owner", "variables": {"limit": value}, "steps": [
+                    {"request": {"url": origin, "method": "POST"}, "expect": {"statuses": [200]}},
+                    {"request": {"url": origin}, "expect": {"json_number": {"/balance": {"lte": "{{limit}}"}}}}]}]}
+            sender = Mock()
+            with tempfile.TemporaryDirectory() as td, self.assertRaisesRegex(ValueError, "known json_number"):
+                execute_workflows(config, {"assets": [origin]}, td, authorized=True, transport=sender)
+            sender.assert_not_called()
+
+    def test_capture_replaces_invalid_initial_bound(self):
+        origin = "https://app.example.test"
+        for kind in ["capture", "dom"]:
+            first = {"request": {"url": origin}, "expect": {"statuses": [200]}}
+            if kind == "capture":
+                first["capture"] = {"limit": "/balance"}
+            else:
+                first["request"]["browser"] = {"capture_dom": {"limit": {"selector": "#balance"}}}
+            config = {"engine": "browser" if kind == "dom" else "http",
+                      "identities": {"owner": {"origin": origin}}, "workflows": [{
+                          "id": "balance", "identity": "owner", "variables": {"limit": "unknown"},
+                          "steps": [first, {"request": {"url": origin},
+                                           "expect": {"json_number": {"/balance": {"lte": "{{limit}}"}}}}]}]}
+            validate_manifest(config, {"assets": [origin]})
+
     def test_boundaries_and_strict_types(self):
         for value, passed in [(0, True), (5.5, True), (10, True), (-1, False),
                               (11, False), (True, False), ("5", False), (None, False)]:

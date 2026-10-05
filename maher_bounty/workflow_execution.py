@@ -389,12 +389,18 @@ def validate_manifest(manifest, scope):
         if not isinstance(initial, dict) or any(not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) for key in initial):
             raise ValueError("workflow variables require valid named values")
         available = set(initial)
+        known = dict(initial)
         for step in workflow["steps"] + cleanup:
             if not isinstance(step, dict):
                 raise ValueError("workflow steps must be objects")
             if not step.get("expect"):
                 raise ValueError("every workflow step requires expected behavior")
             _validate_expectation(step["expect"], allow_templates=True)
+            for bounds in step["expect"].get("json_number", {}).values():
+                for bound in bounds.values():
+                    match = re.fullmatch(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}", bound) if isinstance(bound, str) else None
+                    if match and match.group(1) in known and not _finite_number(known[match.group(1)]):
+                        raise ValueError("known json_number bounds must be finite numbers")
             captures = step.get("capture", {})
             if not isinstance(captures, dict):
                 raise ValueError("capture requires a JSON Pointer mapping")
@@ -412,6 +418,9 @@ def validate_manifest(manifest, scope):
                 raise ValueError("workflow uses a variable before initialization or an earlier capture")
             available.update(captures)
             available.update(dom_captures)
+            # A successful capture replaces the initial value with a runtime value.
+            for variable in set(captures) | set(dom_captures):
+                known.pop(variable, None)
             name = step.get("identity", workflow["identity"])
             if name not in identities:
                 raise ValueError("workflow step requires a known identity")
