@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 from http.cookies import SimpleCookie
 
 from .scope_policy import is_in_scope_url
-from .workflow_execution import _origin, _protected_headers, _validate_browser_settings, _validate_proxy
+from .workflow_execution import _origin, _protected_headers, _validate_browser_settings, _validate_proxy, _wait_for_interval
 from .burp_evidence import _safe_url
 
 
@@ -69,7 +69,12 @@ class BrowserTransport:
             self.blocked += 1
             route.abort()
             return
-        time.sleep(max(0, self.interval - (time.monotonic() - self.last)))
+        try:
+            _wait_for_interval(self.last, self.interval, self.deadline)
+        except RuntimeError:
+            self.blocked += 1
+            route.abort()
+            return
         if time.monotonic() >= self.deadline:
             self.blocked += 1
             route.abort()
