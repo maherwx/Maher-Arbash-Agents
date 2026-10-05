@@ -127,7 +127,10 @@ def main():
         print(json.dumps(write_status(_service_config(a)), indent=2))
         return
     if a.cmd == "run":
-        result = run(a.scope, a.rules, a.out, a.inventory, authorized=a.authorized, traffic_path=a.traffic)
+        result = run(
+            a.scope, a.rules, a.out, a.inventory, authorized=a.authorized,
+            **({"traffic_path": a.traffic} if a.traffic else {}),
+        )
         active = result.get("active_testing", {})
         status = active.get("status", "completed" if active else "skipped")
         findings = active.get("unique_findings", len(active.get("findings", [])))
@@ -144,7 +147,10 @@ def main():
         )
         return
     if a.cmd == "auto-run":
-        result = run_target(a.target, a.rules, a.out, authorized=a.authorized, traffic_path=a.traffic)
+        result = run_target(
+            a.target, a.rules, a.out, authorized=a.authorized,
+            **({"traffic_path": a.traffic} if a.traffic else {}),
+        )
         active = result.get("active_testing", {})
         validation = result.get("validated_evidence", {}).get("counts", {})
         print(json.dumps({
