@@ -8,20 +8,36 @@ from urllib.parse import parse_qsl, urlsplit
 
 _SENSITIVE_NAME = re.compile(r"(token|secret|password|passwd|session|authorization|cookie|api[_-]?key)", re.I)
 _UUID = re.compile(r"(?i)^[0-9a-f]{8}-[0-9a-f-]{27,}$")
+_OPAQUE = re.compile(r"(?i)^(?:[a-f0-9]{24,}|[a-z0-9_-]{32,})$")
+
+
+def _safe_host(parsed) -> str:
+    host = parsed.hostname or ""
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if ":" in host and not host.startswith("["):
+        host = "[" + host + "]"
+    default_port = 443 if parsed.scheme.lower() == "https" else 80
+    return host.lower() + (f":{port}" if port and port != default_port else "")
 
 
 def _route(record: dict) -> str:
     parsed = urlsplit(str(record.get("url") or ""))
+    host = _safe_host(parsed)
     parts = []
     for segment in (parsed.path or "/").split("/"):
         if not segment:
             continue
-        if segment.isdigit():
+        if _SENSITIVE_NAME.search(segment) or _OPAQUE.match(segment):
+            segment = "{sensitive}"
+        elif segment.isdigit():
             segment = "{int}"
         elif _UUID.match(segment):
             segment = "{uuid}"
         parts.append(segment)
-    return (parsed.netloc.lower() + "/" + "/".join(parts)).rstrip("/") or parsed.netloc.lower() + "/"
+    return (host + "/" + "/".join(parts)).rstrip("/") or host + "/"
 
 
 def _http_parts(raw: str, kind: str) -> tuple[dict[str, str], str, int | None]:
@@ -182,7 +198,7 @@ def audit_response_posture(records: list[dict]) -> dict:
     host_rows = defaultdict(lambda: {"https": False, "requests": 0, "header_presence": Counter(), "signals": []})
     for record in records[:20000]:
         parsed = urlsplit(str(record.get("url") or ""))
-        host = parsed.netloc.lower()
+        host = _safe_host(parsed)
         if not host:
             continue
         headers, _, _ = _http_parts(str(record.get("response_raw") or ""), "response")
@@ -196,13 +212,17 @@ def audit_response_posture(records: list[dict]) -> dict:
         if origin == "*" and credentials == "true":
             host_rows[host]["signals"].append("wildcard_cors_with_credentials")
         for cookie in headers.get("set-cookie", "").splitlines():
-            flags = cookie.lower()
+            parts = [part.strip().lower() for part in cookie.split(";")]
             cookie_name = cookie.split("=", 1)[0].strip()
-            if cookie_name and "secure" not in flags:
+            attributes = set(parts[1:])
+            secure = "secure" in attributes
+            httponly = "httponly" in attributes
+            same_site_none = any(part.replace(" ", "") == "samesite=none" for part in attributes)
+            if cookie_name and not secure:
                 host_rows[host]["signals"].append("cookie_missing_secure")
-            if cookie_name and "httponly" not in flags:
+            if cookie_name and not httponly:
                 host_rows[host]["signals"].append("cookie_missing_httponly")
-            if "samesite=none" in flags and "secure" not in flags:
+            if same_site_none and not secure:
                 host_rows[host]["signals"].append("samesite_none_without_secure")
     results = []
     for host, data in sorted(host_rows.items()):
