@@ -5,6 +5,9 @@ description = "Local multi-agent bug bounty research orchestrator"
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0"]
 
+[project.optional-dependencies]
+local-inference = ["llama-cpp-python>=0.3.14"]
+
 [project.scripts]
 maher-bounty = "maher_bounty.cli:main"
 
