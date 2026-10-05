@@ -11,6 +11,10 @@ import yaml
 from .scope_policy import is_in_scope_url
 
 
+def find_zap_executable():
+    return next((name for name in ("zap-baseline.py", "zaproxy", "zap.sh") if shutil.which(name)), None)
+
+
 def run_zap_baseline(target, out_dir, scope, execute):
     parsed = urlparse(target)
     if (parsed.scheme not in {"http", "https"} or not parsed.hostname
@@ -19,12 +23,12 @@ def run_zap_baseline(target, out_dir, scope, execute):
         raise ValueError("ZAP target must be a literal in-scope HTTP URL")
     root = Path(out_dir).resolve() / ("zap-" + uuid.uuid4().hex[:12])
     root.mkdir(parents=True, exist_ok=True)
-    if shutil.which("zap-baseline.py"):
+    executable = find_zap_executable()
+    if executable == "zap-baseline.py":
         result = execute(["zap-baseline.py", "-t", target, "-m", "2", "-T", "30",
                           "-J", str(root / "report.json"), "-r", str(root / "report.html")], timeout=180)
         return {**result, "tool": "zap-baseline.py", "target": target,
                 "execution_engine": "packaged_baseline", "artifact_dir": str(root)}
-    executable = next((name for name in ("zaproxy", "zap.sh") if shutil.which(name)), None)
     if executable is None:
         return {"tool": "zap-baseline.py", "status": "missing", "target": target,
                 "reason": "neither packaged baseline nor native ZAP CLI is installed"}
