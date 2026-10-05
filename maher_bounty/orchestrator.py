@@ -189,6 +189,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 active_testing.get("discovered_in_scope_urls", []),
                 out / "active" / "agent-followups",
                 scope=scope,
+                active_testing=active_testing,
             )
             active_testing["agent_tool_followups"] = followup_summary
             if followup_summary.get("findings"):
