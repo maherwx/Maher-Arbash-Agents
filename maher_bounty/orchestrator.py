@@ -20,6 +20,7 @@ from .traffic_ingest import ingest_traffic
 from .burp_evidence import build_scoped_traffic_evidence, build_traffic_target_references
 from .advanced_analysis import build_application_intelligence, normalize_evidence, validate_evidence, build_agent_workstreams, write_advanced_artifacts
 from .advanced_web_tools import run_advanced_web_tools
+from .workflow_execution import execute_workflows, validate_manifest
 
 
 def load_agents():
@@ -100,7 +101,7 @@ def active_discovery_enabled(rules: dict, *, authorized: bool) -> bool:
     return bool(authorized) if configured is None else bool(configured)
 
 
-def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None, *, authorized=False, traffic_path=None):
+def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None, *, authorized=False, traffic_path=None, workflow_manifest_path=None):
     if not rules.get("authorization_required", True):
         raise SystemExit("rules.yaml must keep authorization_required=true")
     active_enabled = active_discovery_enabled(rules, authorized=authorized)
@@ -108,11 +109,17 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         raise SystemExit("active discovery requires --authorized to confirm permission for the listed scope")
     rules = dict(rules)
     rules["allow_active_discovery"] = active_enabled
+    if workflow_manifest_path and (not authorized or not active_enabled):
+        raise ValueError("workflow execution requires authorized active testing")
     scope = dict(scope or {})
     scope.setdefault("program", "Authorized target assessment")
     if target and not scope.get("assets"):
         scope["assets"] = [target]
     scope.setdefault("out_of_scope", [])
+    workflow_manifest = None
+    if workflow_manifest_path:
+        workflow_manifest = json.loads(Path(workflow_manifest_path).read_text(encoding="utf-8"))
+        validate_manifest(workflow_manifest, scope)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     store = ResearchStore()
@@ -150,10 +157,23 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         active_testing = {"status": "skipped", "reason": "allow_active_discovery=false", "findings": []}
         if active_enabled:
             print("[active] Testing all authorized assets discovered in scope", flush=True)
+            (out / "active").mkdir(parents=True, exist_ok=True)
             active_testing = run_active_testing(target, inventory, out / "active", scope=scope)
             store.checkpoint(run_id, "active_testing", active_testing)
         else:
             print("[active] SKIPPED: rules.yaml has allow_active_discovery=false; reports contain hypotheses only.", flush=True)
+
+        workflow_execution = {"status": "requires_input", "reason": "no workflow manifest supplied", "findings": []}
+        if workflow_manifest_path:
+            print("[workflows] Executing identity access matrix and application invariants", flush=True)
+            workflow_execution = execute_workflows(
+                workflow_manifest, scope,
+                out / "workflows", authorized=authorized,
+            )
+            active_testing["findings"] = _dedupe([*active_testing.get("findings", []), *workflow_execution["findings"]])
+            active_testing["unique_findings"] = len(active_testing["findings"])
+            store.checkpoint(run_id, "workflow_execution", workflow_execution)
+        active_testing["workflow_execution"] = workflow_execution
 
         print("[intelligence] Building application model and evidence graph", flush=True)
         intelligence_target = target or inventory.get("target") or ""
@@ -311,6 +331,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "inventory_counts": inventory.get("counts", {}),
             "inventory_source": source_file, "tool_plan": inventory.get("tool_plan", {}),
             "active_testing": active_testing, "burp_traffic_evidence": traffic_evidence,
+            "workflow_execution": workflow_execution,
             "application_intelligence": intelligence,
             "validated_evidence": validation, "agent_workstreams": workstreams,
             "hypothesis_count": len(hypotheses), "hypotheses": hypotheses,
@@ -332,15 +353,17 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
     except Exception:
         store.finish(run_id, "failed")
         raise
+    finally:
+        store.db.close()
 
 
-def run(scope_path, rules_path, out_dir="reports", inventory_path=None, *, authorized=False, traffic_path=None):
+def run(scope_path, rules_path, out_dir="reports", inventory_path=None, *, authorized=False, traffic_path=None, workflow_manifest_path=None):
     scope = yaml.safe_load(Path(scope_path).read_text(encoding="utf-8"))
     rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8"))
-    return _run_loaded(scope, rules, out_dir, inventory_path, authorized=authorized, traffic_path=traffic_path)
+    return _run_loaded(scope, rules, out_dir, inventory_path, authorized=authorized, traffic_path=traffic_path, workflow_manifest_path=workflow_manifest_path)
 
 
-def run_target(target: str, rules_path: str | None = None, out_dir="results/auto", *, authorized=False, traffic_path=None):
+def run_target(target: str, rules_path: str | None = None, out_dir="results/auto", *, authorized=False, traffic_path=None, workflow_manifest_path=None):
     if not authorized:
         raise SystemExit("auto-run requires --authorized to confirm permission for this target")
     rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8")) if rules_path else {
@@ -349,4 +372,4 @@ def run_target(target: str, rules_path: str | None = None, out_dir="results/auto
         "no_persistence": True, "report_evidence": True,
         "allow_active_discovery": True,
     }
-    return _run_loaded({"program": "Authorized target assessment", "assets": [target], "out_of_scope": []}, rules, out_dir, target=target, authorized=True, traffic_path=traffic_path)
+    return _run_loaded({"program": "Authorized target assessment", "assets": [target], "out_of_scope": []}, rules, out_dir, target=target, authorized=True, traffic_path=traffic_path, workflow_manifest_path=workflow_manifest_path)

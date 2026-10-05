@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from .result_store import build_inventory, stable_id
 from .scope_policy import is_in_scope_url
+from .process_runtime import run as run_process
 
 
 PASSIVE_TOOLS = ("subfinder", "assetfinder", "waybackurls", "gau", "httpx", "whatweb", "wafw00f")
@@ -54,9 +55,9 @@ def _run(cmd: list[str], *, stdout_path: Path | None = None, timeout: int = 30) 
         if stdout_path:
             stdout_path.parent.mkdir(parents=True, exist_ok=True)
             with stdout_path.open("w", encoding="utf-8") as fh:
-                cp = subprocess.run(cmd, stdout=fh, stderr=subprocess.PIPE, text=True, timeout=effective_timeout, check=False)
+                cp = run_process(cmd, stdout=fh, stderr=subprocess.PIPE, text=True, timeout=effective_timeout, check=False)
         else:
-            cp = subprocess.run(cmd, capture_output=True, text=True, timeout=effective_timeout, check=False)
+            cp = run_process(cmd, capture_output=True, text=True, timeout=effective_timeout, check=False)
         status = "ok" if cp.returncode == 0 else "nonzero"
         print(f"[tool] {executable} {status}", flush=True)
         return {"tool": executable, "status": status, "returncode": cp.returncode, "stderr": (cp.stderr or "")[-2000:], "command": cmd, "timeout_seconds": effective_timeout}
@@ -66,6 +67,9 @@ def _run(cmd: list[str], *, stdout_path: Path | None = None, timeout: int = 30) 
             stderr = stderr.decode("utf-8", errors="replace")
         print(f"[tool] {executable} timed out; continuing", flush=True)
         return {"tool": executable, "status": "timeout", "command": cmd, "timeout_seconds": effective_timeout, "stderr": str(stderr)[-2000:]}
+    except OSError as exc:
+        return {"tool": executable, "status": "nonzero", "returncode": None, "command": cmd,
+                "timeout_seconds": effective_timeout, "error_category": "process_launch_failed", "stderr": str(exc)[-2000:]}
 
 
 def plan_tools(target: str, rules: dict | None = None) -> dict:

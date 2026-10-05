@@ -227,16 +227,18 @@ class AgentToolRouterTests(unittest.TestCase):
         self.assertTrue(any(row["reason"] == "no_known_eligible_targets" for row in summary["decisions"]))
 
 
-    def test_nonzero_tool_run_is_not_treated_as_completed_coverage(self):
+    def test_failed_and_timed_out_runs_are_not_repeated_in_followup(self):
         target = "https://app.example.test/"
-        coverage = _prior_coverage(
-            {"runs": [{
-                "tool": "tlsx", "status": "nonzero", "target": target,
-                "command": ["tlsx", "-u", target],
-            }]},
-            {target},
-        )
-        self.assertNotIn("https://app.example.test", coverage["tlsx"])
+        for status in ("nonzero", "timeout", "blocked", "missing"):
+            with self.subTest(status=status):
+                coverage = _prior_coverage(
+                    {"runs": [{
+                        "tool": "tlsx", "status": status, "target": target,
+                        "command": ["tlsx", "-u", target],
+                    }]},
+                    {target},
+                )
+                self.assertIn("https://app.example.test", coverage["tlsx"])
 
     def test_tlsx_followup_uses_json_output_and_valid_probe_options(self):
         target = "https://app.example.test/"

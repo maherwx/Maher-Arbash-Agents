@@ -43,6 +43,7 @@ class EndToEndReadinessTests(unittest.TestCase):
             store.checkpoint(run_id, "inventory", inventory)
             store.add_evidence(run_id, "ci", "inventory", inventory)
             store.finish(run_id)
+            store.db.close()
 
     def test_differential_engine(self):
         result = compare_responses(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -28,25 +29,73 @@ def _record(url: str, method: str = "GET", status: int | None = None, request: s
         "path": u.path or "/",
         "method": method.upper(),
         "status": status,
-        "request_raw": request,
-        "response_raw": response,
+        "request_raw": _redact_headers(request),
+        "response_raw": _redact_headers(response),
         **{k:v for k,v in context.items() if v is not None},
     }
+
+
+def _redact_headers(raw: str) -> str:
+    sensitive = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token", "x-csrf-token"}
+    if raw.lstrip().startswith("{"):
+        try:
+            message = json.loads(raw)
+            for row in message.get("headers", []):
+                if str(row.get("name", "")).lower() in sensitive:
+                    row["value"] = "[redacted]"
+            for row in message.get("cookies", []):
+                row["value"] = "[redacted]"
+            return json.dumps(message, ensure_ascii=False)
+        except (ValueError, AttributeError, TypeError):
+            return raw
+    boundary = re.search(r"\r?\n\r?\n", raw)
+    head = raw[:boundary.start()] if boundary else raw
+    tail = raw[boundary.start():] if boundary else ""
+    for name in sensitive:
+        head = re.sub(r"(?im)^(" + re.escape(name) + r":)[^\r\n]*", r"\1 [redacted]", head)
+    return head + tail
 
 
 def _har_headers(req: dict) -> dict[str,str]:
     return {str(x.get("name") or "").lower():str(x.get("value") or "") for x in req.get("headers",[]) if x.get("name")}
 
 
+def _stable_identity(value: str | None) -> str | None:
+    if not value:
+        return None
+    return "actor-" + hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _identity_from_headers(headers: dict[str, str]) -> str | None:
+    explicit = headers.get("x-user-id") or headers.get("x-identity") or headers.get("x-session-id")
+    if explicit:
+        return _stable_identity(explicit)
+    cookie = headers.get("cookie", "")
+    session_cookie = re.compile(
+        r"(?:^|;\s*)(?:__Host-)?(?:session(?:id|[_-]?id)?|sid|jsessionid|phpsessid|asp\.net_sessionid|laravel_session|connect\.sid|rack\.session)=([^;]+)",
+        re.I,
+    )
+    match = session_cookie.search(cookie)
+    if match:
+        return _stable_identity(match.group(1))
+    authorization = headers.get("authorization", "")
+    return _stable_identity(authorization) if authorization else None
+
+
 def _har_identity(req: dict) -> str | None:
-    headers=_har_headers(req)
-    explicit=headers.get("x-user-id") or headers.get("x-identity") or headers.get("x-session-id")
-    if explicit: return explicit
-    cookie=headers.get("cookie","")
-    m=re.search(r"(?:^|;\s*)(?:session|sessionid|sid)=([^;]+)",cookie,re.I)
-    return m.group(1) if m else None
+    return _identity_from_headers(_har_headers(req))
 
 
+def _burp_identity(raw: str) -> str | None:
+    value = str(raw or "")
+    boundary = re.search(r"\r?\n\r?\n", value)
+    head = value[:boundary.start()] if boundary else value
+    headers = {}
+    for line in head.splitlines()[1:]:
+        if ":" in line:
+            name, item = line.split(":", 1)
+            headers[name.strip().lower()] = item.strip()
+    return _identity_from_headers(headers)
 def load_har(path: str | Path) -> list[dict]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     out = []
@@ -68,7 +117,11 @@ def load_burp_xml(path: str | Path) -> list[dict]:
         req = item.find("request"); resp = item.find("response")
         request = _decode(req.text if req is not None else "", req is not None and req.attrib.get("base64") == "true")
         response = _decode(resp.text if resp is not None else "", resp is not None and resp.attrib.get("base64") == "true")
-        out.append(_record(url, method, int(status_text) if status_text.isdigit() else None, request, response, "burp", sequence=sequence))
+        out.append(_record(
+            url, method, int(status_text) if status_text.isdigit() else None,
+            request, response, "burp", sequence=sequence,
+            identity=_burp_identity(request),
+        ))
     return out
 
 

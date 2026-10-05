@@ -110,6 +110,8 @@ def analyze_traffic(path: str | Path, *, kind: str = "auto", out_dir: str | Path
     except Exception:
         store.finish(run_id, "failed")
         raise
+    finally:
+        store.db.close()
 
     result["run_id"] = run_id
     return result
