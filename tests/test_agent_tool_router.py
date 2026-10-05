@@ -3,10 +3,38 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from maher_bounty.agent_tool_router import run_agent_tool_requests
+from maher_bounty.agent_tool_router import build_local_tool_requests, run_agent_tool_requests
 
 
 class AgentToolRouterTests(unittest.TestCase):
+    def test_local_coordinator_selects_uncovered_tools_without_a_model(self):
+        root = "https://app.example.test/"
+        query = "https://app.example.test/search?q=blue"
+        plan = build_local_tool_requests(
+            [root, query],
+            scope={"assets": [root], "out_of_scope": []},
+            active_testing={"runs": [{
+                "tool": "nmap", "status": "ok",
+                "command": ["nmap", "-sV", "-Pn", "--top-ports", "100", "app.example.test"],
+            }]},
+            tool_plan={"runs": [{
+                "tool": "subfinder", "status": "ok",
+                "command": ["subfinder", "-silent", "-d", "app.example.test"],
+            }]},
+        )
+        requests = [
+            item for result in plan["agent_results"]
+            for item in result["tool_requests"]
+        ]
+        names = {item["tool"] for item in requests}
+        self.assertIn("dalfox", names)
+        self.assertIn("naabu", names)
+        self.assertNotIn("nmap", names)
+        self.assertNotIn("subfinder", names)
+        self.assertLessEqual(plan["request_count"], 20)
+        self.assertTrue(all(target in {root, query} for item in requests for target in item["targets"]))
+        self.assertEqual(plan["mode"], "local_deterministic_evidence_coordinator")
+
     def test_only_allowlisted_tools_and_known_in_scope_urls_run(self):
         safe = "https://app.example.test/search?q=one"
         outside = "https://attacker.example/path"
