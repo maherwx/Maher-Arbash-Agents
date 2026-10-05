@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from .result_store import build_inventory, stable_id
 from .scope_policy import is_in_scope_url
-from .process_runtime import run as run_process
+from .process_runtime import run as run_process, OutputLimitExceeded
 
 
 PASSIVE_TOOLS = ("subfinder", "assetfinder", "waybackurls", "gau", "httpx", "whatweb", "wafw00f")
@@ -65,8 +65,9 @@ def _run(cmd: list[str], *, stdout_path: Path | None = None, timeout: int = 30) 
         stderr = exc.stderr or ""
         if isinstance(stderr, bytes):
             stderr = stderr.decode("utf-8", errors="replace")
-        print(f"[tool] {executable} timed out; continuing", flush=True)
-        return {"tool": executable, "status": "timeout", "command": cmd, "timeout_seconds": effective_timeout, "stderr": str(stderr)[-2000:]}
+        status = "output_limit" if isinstance(exc, OutputLimitExceeded) else "timeout"
+        print(f"[tool] {executable} {status}; continuing", flush=True)
+        return {"tool": executable, "status": status, "command": cmd, "timeout_seconds": effective_timeout, "stderr": str(stderr)[-2000:]}
     except OSError as exc:
         return {"tool": executable, "status": "nonzero", "returncode": None, "command": cmd,
                 "timeout_seconds": effective_timeout, "error_category": "process_launch_failed", "stderr": str(exc)[-2000:]}

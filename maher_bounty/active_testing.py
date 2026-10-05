@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from .scope_policy import filter_in_scope_urls, scope_target_urls
 from .tool_advisor import recommend_tools
-from .process_runtime import run as run_process
+from .process_runtime import run as run_process, OutputLimitExceeded
 
 SAFE_CONTENT_PATHS = (
     "robots.txt", "sitemap.xml", "security.txt", ".well-known/security.txt",
@@ -62,9 +62,10 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
         if output and (partial or stderr_tail):
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(partial + ("\n" + stderr_tail if stderr_tail else ""), encoding="utf-8", errors="ignore")
-        print(f"[ACTIVE] {tool:<12} TIMEOUT; continuing", flush=True)
+        status = "output_limit" if isinstance(exc, OutputLimitExceeded) else "timeout"
+        print(f"[ACTIVE] {tool:<12} {status.upper()}; continuing", flush=True)
         return {
-            "tool": tool, "status": "timeout", "command": cmd, "timeout_seconds": effective_timeout, "output": str(output) if output else None,
+            "tool": tool, "status": status, "command": cmd, "timeout_seconds": effective_timeout, "output": str(output) if output else None,
             "stderr_tail": stderr_tail, "stdout_tail": partial[-1000:],
         }
     except OSError as exc:
@@ -154,6 +155,9 @@ def _tool_coverage(inventory: dict, runs: list[dict]) -> list[dict]:
             elif "timeout" in attempted:
                 item["execution_status"] = "timed_out"
                 item["reason"] = "tool did not finish within its configured process budget"
+            elif "output_limit" in attempted:
+                item["execution_status"] = "output_limited"
+                item["reason"] = "tool exceeded its captured output budget; results are incomplete"
             elif "nonzero" in attempted:
                 item["execution_status"] = "failed"
                 item["reason"] = "tool returned a nonzero exit status; inspect run diagnostics"
@@ -395,6 +399,7 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
         "executed": sum(1 for row in runs if row.get("status") not in {"missing", "skipped"}),
         "missing": sum(1 for row in runs if row.get("status") == "missing"),
         "timeouts": sum(1 for row in runs if row.get("status") == "timeout"),
+        "output_limits": sum(1 for row in runs if row.get("status") == "output_limit"),
         "failed": sum(1 for row in runs if row.get("status") == "nonzero"),
         "raw_findings": len(findings), "unique_findings": len(unique),
         "scope_review": scope_review, "adaptive_tool_plan": adaptive_tool_plan,
