@@ -16,6 +16,8 @@ class ActiveToolDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["status"], "nonzero")
         self.assertEqual(result["returncode"], 2)
         self.assertIn("no templates found", result["stderr_tail"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 182)
+        self.assertEqual(result["timeout_seconds"], 182)
 
     @patch("maher_bounty.active_testing.shutil.which", return_value="/usr/bin/nuclei")
     @patch("maher_bounty.active_testing.subprocess.run", side_effect=subprocess.TimeoutExpired("nuclei", 1, stderr=b"network stalled"))
@@ -23,6 +25,8 @@ class ActiveToolDiagnosticsTests(unittest.TestCase):
         result = _exec(["nuclei", "-u", "https://example.test/"], timeout=1)
         self.assertEqual(result["status"], "timeout")
         self.assertIn("network stalled", result["stderr_tail"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 181)
+        self.assertEqual(result["timeout_seconds"], 181)
 
 
 if __name__ == "__main__":
