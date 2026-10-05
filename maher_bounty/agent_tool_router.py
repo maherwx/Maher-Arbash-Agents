@@ -68,7 +68,7 @@ def _prior_coverage(active_testing: dict, known: set[str]) -> dict[str, set[str]
                     pass
         elif tool == "zap-baseline.py":
             try:
-                covered["zap-baseline.py"].add(command[command.index("-t") + 1])
+                covered["zap-baseline.py"].add(_origin(command[command.index("-t") + 1]))
             except (ValueError, IndexError):
                 pass
     return covered
@@ -149,19 +149,25 @@ def run_agent_tool_requests(
 
     runs, findings = [], []
     new_crawl_urls = []
-    hakrawler_origins = list(dict.fromkeys(_origin(url) for url in selected["hakrawler"] if _origin(url)))[:MAX_HAKRAWLER_ORIGINS]
-    for index, origin in enumerate(hakrawler_origins, start=1):
+    hakrawler_urls = []
+    seen_hakrawler_origins = set()
+    for url in selected["hakrawler"]:
+        origin = _origin(url)
+        if origin and origin not in seen_hakrawler_origins:
+            seen_hakrawler_origins.add(origin)
+            hakrawler_urls.append(url)
+    for index, scan_url in enumerate(hakrawler_urls[:MAX_HAKRAWLER_ORIGINS], start=1):
         if not shutil.which("hakrawler"):
-            runs.append({"tool": "hakrawler", "status": "missing", "target": origin, "reason": "agent-requested route discovery; binary not installed"})
+            runs.append({"tool": "hakrawler", "status": "missing", "target": scan_url, "reason": "agent-requested route discovery; binary not installed"})
             continue
         output = root / f"hakrawler-agent-{index}.txt"
         result = _exec(
             ["hakrawler", "-d", "2", "-timeout", "10"],
             timeout=45,
             output=output,
-            input_text=origin + "\n",
+            input_text=scan_url + "\n",
         )
-        result["target"] = origin
+        result["target"] = scan_url
         runs.append(result)
         if output.exists():
             lines = [line.strip() for line in output.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
@@ -204,20 +210,23 @@ def run_agent_tool_requests(
         else:
             runs.append({"tool": "dalfox", "status": "missing", "reason": "agent-requested XSS follow-up; binary not installed"})
 
-    zap_urls = list(dict.fromkeys(
-        _origin(url) for url in selected["zap-baseline.py"]
-        if _origin(url) and _origin(url) not in covered["zap-baseline.py"]
-    ))[:MAX_ZAP_ORIGINS]
-    for index, origin in enumerate(zap_urls, start=1):
+    zap_targets = []
+    seen_zap_origins = set()
+    for url in selected["zap-baseline.py"]:
+        origin = _origin(url)
+        if origin and origin not in covered["zap-baseline.py"] and origin not in seen_zap_origins:
+            seen_zap_origins.add(origin)
+            zap_targets.append(url)
+    for index, scan_url in enumerate(zap_targets[:MAX_ZAP_ORIGINS], start=1):
         if shutil.which("zap-baseline.py"):
             output_json = root / f"zap-agent-followup-{index}.json"
             output_html = root / f"zap-agent-followup-{index}.html"
             runs.append(_exec([
-                "zap-baseline.py", "-t", origin, "-m", "2", "-T", "30",
+                "zap-baseline.py", "-t", scan_url, "-m", "2", "-T", "30",
                 "-J", str(output_json), "-r", str(output_html),
             ], timeout=180))
         else:
-            runs.append({"tool": "zap-baseline.py", "status": "missing", "target": origin, "reason": "agent-requested ZAP baseline; binary not installed"})
+            runs.append({"tool": "zap-baseline.py", "status": "missing", "target": scan_url, "reason": "agent-requested ZAP baseline; binary not installed"})
     return {
         "mode": "allowlisted_shell_tool_followups",
         "request_count": len(requests),
