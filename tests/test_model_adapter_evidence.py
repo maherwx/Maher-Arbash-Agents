@@ -74,7 +74,7 @@ class ModelAdapterEvidenceTests(unittest.TestCase):
             result = adapter.analyze({"id": "reviewer", "mission": "Review"}, {"inventory": {}})
         self.assertEqual(adapter.mode, "local_deterministic")
         self.assertEqual(result["status"], "planned")
-        self.assertTrue(any("not executed" in note for note in result["evidence_notes"]))
+        self.assertTrue(any("deterministic on-device" in note for note in result["evidence_notes"]))
 
     def test_non_loopback_model_endpoint_is_never_used(self):
         with patch.dict(os.environ, {
