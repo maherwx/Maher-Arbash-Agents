@@ -99,6 +99,21 @@ class BrowserRuntimeTests(unittest.TestCase):
         self.assertTrue(result["findings"][0]["validated"])
         self.assertGreaterEqual(result["transport"]["network_requests"], 4)
 
+    def test_request_pacing_cannot_exceed_remaining_browser_budget(self):
+        sender = BrowserTransport({"owner": {"origin": self.origin}}, {"assets": [self.origin]}, interval=3600)
+        try:
+            sender.last = time.monotonic()
+            sender.deadline = sender.last + 1
+            started = time.monotonic()
+            with self.assertRaises(RuntimeError):
+                sender("owner", {"url": self.origin + "/check"})
+            self.assertLess(time.monotonic() - started, 2)
+            self.assertFalse(self.seen)
+            self.assertEqual(sender.summary()["blocked_requests"], 1)
+            self.assertEqual(sender.summary()["network_requests"], 0)
+        finally:
+            sender.close()
+
     def test_failed_dependency_cannot_confirm_rendered_resource_proof(self):
         self.check_incomplete_dependency("/degraded", "failed_requests")
 

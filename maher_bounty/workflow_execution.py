@@ -70,6 +70,38 @@ def _protected_headers(identity):
         header.lower() for header in identity.get("headers_env", {})}
 
 
+def _finite_number(value):
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _validate_limits(limits):
+    keys = {"timeout_seconds", "total_seconds", "interval_seconds", "max_requests"}
+    if not isinstance(limits, dict) or set(limits) - keys:
+        raise ValueError("workflow limits require supported keys")
+    for key, value in limits.items():
+        if key == "max_requests":
+            if type(value) is not int or value < 1:
+                raise ValueError("max_requests must be a positive integer")
+        elif (not _finite_number(value)
+              or value < 0 or (key != "interval_seconds" and value == 0)):
+            raise ValueError("workflow time limits must be finite numbers with positive timeouts and nonnegative interval")
+
+
+def _wait_for_interval(last, interval, deadline):
+    if not _finite_number(interval) or interval < 0:
+        raise ValueError("request interval must be finite and nonnegative")
+    now = time.monotonic()
+    delay = max(0, interval - (now - last))
+    if now >= deadline or delay >= deadline - now:
+        raise RuntimeError("request pacing exceeds remaining run budget")
+    time.sleep(delay)
+
+
 def _validate_browser_settings(settings):
     supported = {"actions", "wait_for", "wait_for_network_idle", "body_selector", "capture_dom"}
     if not isinstance(settings, dict) or set(settings) - supported:
@@ -271,6 +303,7 @@ def _resolve(value, variables, *, url=False):
 
 
 def validate_manifest(manifest, scope):
+    _validate_limits(manifest.get("limits", {}))
     if not isinstance(manifest, dict):
         raise ValueError("workflow manifest must be an object")
     if manifest.get("engine", "http") not in ("http", "browser"):
@@ -398,7 +431,7 @@ class Transport:
             raise ValueError("request headers cannot override identity credentials")
         if self.count >= self.budget:
             raise RuntimeError("request budget exhausted")
-        time.sleep(max(0, self.interval - (time.monotonic() - self.last)))
+        _wait_for_interval(self.last, self.interval, self.deadline)
         if time.monotonic() >= self.deadline:
             raise RuntimeError("HTTP run deadline exhausted")
         self.count += 1

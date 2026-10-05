@@ -1,5 +1,14 @@
 # Browser-driven application research
 
+Manifest `limits` accepts only `timeout_seconds`, `total_seconds`,
+`interval_seconds` and `max_requests`. Timeouts must be finite positive numbers,
+the interval a finite nonnegative number and the request budget a positive
+integer. Booleans, strings and unknown keys fail preflight before browser launch.
+Existing runtime clamps remain: timeout 1 to 60 seconds, total 1 to 3600 seconds,
+request budget 1 to 2000, interval at least 0.1 seconds. If the next request's pacing
+delay cannot fit inside the remaining run budget, execution becomes inconclusive
+without sleeping beyond the deadline or sending that request.
+
 Install the optional browser runtime in your project environment:
 
 ```sh
