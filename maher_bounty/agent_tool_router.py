@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import shutil
+from collections import deque
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -40,16 +41,32 @@ def _coverage_key(tool: str, url: str) -> str:
 
 
 def _request_rows(results: list[dict]) -> list[dict]:
-    rows = []
-    for result in results:
+    # Share the request budget across roles, including repeated packets from
+    # the same role. A request cannot impersonate another agent.
+    queues = {}
+    for result in results[:120]:
+        if not isinstance(result, dict):
+            continue
         requests = result.get("tool_requests", [])
         if not isinstance(requests, list):
             continue
-        for request in requests:
-            if isinstance(request, dict):
-                rows.append({"agent": result.get("agent"), **request})
-            if len(rows) >= MAX_AGENT_REQUESTS:
-                return rows
+        agent = result.get("agent")
+        agent = agent[:128] if isinstance(agent, str) and agent else "unknown"
+        queue = queues.setdefault(agent, deque())
+        for request in requests[:MAX_AGENT_REQUESTS]:
+            if isinstance(request, dict) and len(queue) < MAX_AGENT_REQUESTS:
+                queue.append({**request, "agent": agent})
+    rows = []
+    while len(rows) < MAX_AGENT_REQUESTS:
+        progressed = False
+        for queue in queues.values():
+            if queue:
+                rows.append(queue.popleft())
+                progressed = True
+            if len(rows) == MAX_AGENT_REQUESTS:
+                break
+        if not progressed:
+            break
     return rows
 
 
@@ -540,6 +557,8 @@ def run_agent_tool_requests(
         runs.append(run_zap_baseline(scan_url, root, scope, _exec))
     return {
         "mode": "allowlisted_shell_tool_followups",
+        "request_scheduling": "round_robin_by_role",
+        "requesting_agent_count": len({row["agent"] for row in requests}),
         "request_count": len(requests),
         "known_in_scope_url_count": len(known),
         "rejected_inventory_url_count": len(rejected),

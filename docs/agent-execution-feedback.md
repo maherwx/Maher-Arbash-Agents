@@ -48,3 +48,18 @@ loop remains available, and no specialist model review is reported as having run
 
 This change has not been executed or tested following the user's instruction to
 edit the tool without experiments. Runtime verification remains outstanding.
+
+The router now allocates its twenty-request budget round robin by originating
+role. Multiple result packets from the same role share a queue, so an early
+specialist's long request list cannot consume the entire request budget before
+later roles are considered. This is request fairness, not parallel execution or
+equal target allocation: the existing target and process limits still apply.
+An embedded request cannot override its originating agent identity. Reports
+record the scheduling mode and the number of requesting roles.
+
+Local model response fields must be lists; malformed field shapes produce a
+model error instead of breaking evidence/report consumers. Finding and request
+entries must be objects, and lists are bounded. The shared evidence bus skips
+malformed packets and fields. Authorization roles are classified before the
+generic identity/auth substring, so they enter the authorization review wave.
+These additions were reviewed statically only and remain untested at runtime.

@@ -172,6 +172,13 @@ class LocalModelAdapter:
             )
             text = raw["choices"][0]["message"]["content"]
             result = _json_object(text)
+            # Invalid JSON field shapes must not reach evidence/report consumers.
+            for field in ("observations", "candidate_findings", "evidence_notes", "next_checks", "tool_requests"):
+                value = result.get(field, [])
+                if not isinstance(value, list):
+                    raise ValueError(f"local model field {field} must be a list")
+                expected = (dict,) if field in {"candidate_findings", "tool_requests"} else (str, dict)
+                result[field] = [item for item in value[:120] if isinstance(item, expected)]
             result["agent"] = agent["id"]
             result.setdefault("status", "completed")
             result.setdefault("observations", [])
