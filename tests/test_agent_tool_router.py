@@ -49,6 +49,36 @@ class AgentToolRouterTests(unittest.TestCase):
         self.assertEqual(command[-1], route)
         self.assertEqual(summary["runs"][0]["target"], route)
 
+    def test_alterx_routes_only_resolved_in_scope_hosts_to_http_and_nuclei(self):
+        seed = "https://app.example.test/"
+        resolved = "api.app.example.test"
+        discovered = "https://api.app.example.test/"
+
+        def fake_exec(command, **kwargs):
+            output = kwargs.get("output")
+            if command[0] == "alterx":
+                output.write_text(resolved + "\\napi.outside.test\\n", encoding="utf-8")
+            elif command[0] == "dnsx":
+                output.write_text(resolved + " [A] 192.0.2.10\\n", encoding="utf-8")
+            elif command[0] == "httpx":
+                output.write_text('{"url":"' + discovered + '"}\\n', encoding="utf-8")
+            return {"tool": command[0], "status": "ok", "command": command}
+
+        with tempfile.TemporaryDirectory() as td, \
+             patch("maher_bounty.agent_tool_router.shutil.which", return_value="/usr/bin/tool"), \
+             patch("maher_bounty.agent_tool_router._exec", side_effect=fake_exec) as execute:
+            summary = run_agent_tool_requests(
+                [{"agent": "subdomain_reviewer", "tool_requests": [{
+                    "tool": "alterx", "targets": [seed], "reason": "known host pattern",
+                }]}],
+                [seed], td,
+                scope={"assets": [seed, "*.example.test"], "out_of_scope": ["*.outside.test"]},
+            )
+        commands = [call.args[0] for call in execute.call_args_list]
+        self.assertEqual([command[0] for command in commands], ["alterx", "dnsx", "httpx", "nuclei"])
+        self.assertIn("api.outside.test", str(summary["runs"][0].get("output", "")))
+        self.assertEqual(summary["new_in_scope_urls"], [discovered])
+
     def test_reuses_passive_subfinder_coverage_from_inventory(self):
         target = "https://app.example.test/"
         plan = {"runs": [{
