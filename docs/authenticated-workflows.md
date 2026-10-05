@@ -47,6 +47,11 @@ resource proof is evidence-backed. A generic HTTP 200, login page, invalid
 baseline, truncated body, or network failure cannot confirm forbidden access.
 Workflow invariant failures require impact review; they are not automatically
 confirmed security findings. JSON assertions use JSON Pointer syntax.
+JSON proofs compare booleans separately from numbers, including inside nested
+objects and arrays (`true` cannot prove resource ID `1`). Numeric `1` and `1.0`
+remain equivalent. Responses with duplicate object keys or nonfinite numbers
+cannot provide JSON proof or captured state. Array pointers require canonical
+nonnegative indices; negative indices and leading zeros are rejected.
 
 Each workflow step may specify `"identity":"other"` to override the workflow's
 default identity. Only configured identities are accepted, and every request is

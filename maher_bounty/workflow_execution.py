@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -31,15 +32,55 @@ def _origin(url):
     return parsed.scheme, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
 
 
+def _json_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("ambiguous JSON object")
+        result[key] = value
+    return result
+
+
+def _invalid_json_constant(value):
+    raise ValueError("nonfinite JSON value")
+
+
+def _json_float(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("nonfinite JSON number")
+    return number
+
+
+def _json_equal(actual, expected):
+    # JSON has separate boolean and number types, unlike Python equality.
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return type(actual) is type(expected) and actual == expected
+    if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
+        return (isinstance(actual, int) or math.isfinite(actual)) and (isinstance(expected, int) or math.isfinite(expected)) and actual == expected
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(actual, dict):
+        return actual.keys() == expected.keys() and all(_json_equal(actual[k], expected[k]) for k in actual)
+    if isinstance(actual, list):
+        return len(actual) == len(expected) and all(_json_equal(a, b) for a, b in zip(actual, expected))
+    return actual == expected
+
+
 def _json_value(body, pointer):
-    value = json.loads(body)
+    value = json.loads(body, object_pairs_hook=_json_pairs, parse_constant=_invalid_json_constant, parse_float=_json_float)
     if pointer == "":
         return value
     if not pointer.startswith("/"):
         raise ValueError("JSON pointer must be empty or start with /")
     for part in pointer[1:].split("/"):
         part = part.replace("~1", "/").replace("~0", "~")
-        value = value[int(part)] if isinstance(value, list) else value[part]
+        if isinstance(value, list):
+            if not re.fullmatch(r"0|[1-9][0-9]*", part):
+                raise ValueError("invalid JSON array index")
+            value = value[int(part)]
+        else:
+            value = value[part]
     return value
 
 
@@ -53,8 +94,8 @@ def _assertions(response, expected):
         checks.append({"kind": "absent", "passed": marker not in response["body"]})
     for pointer, wanted in expected.get("json_equals", {}).items():
         try:
-            passed = _json_value(response["body"], pointer) == wanted
-        except (ValueError, KeyError, IndexError, TypeError):
+            passed = _json_equal(_json_value(response["body"], pointer), wanted)
+        except (ValueError, KeyError, IndexError, TypeError, RecursionError):
             passed = False
         checks.append({"kind": "json_equals", "pointer": pointer, "passed": passed})
     return checks
@@ -87,6 +128,10 @@ def _validate_expectation(expected):
         values = expected["json_equals"]
         if not isinstance(values, dict) or any(not isinstance(p, str) or (p and not p.startswith("/")) for p in values):
             raise ValueError("json_equals requires JSON Pointer keys")
+        try:
+            json.dumps(values, allow_nan=False)
+        except (ValueError, TypeError, RecursionError):
+            raise ValueError("json_equals requires finite JSON values") from None
         count += len(values)
     if not count:
         raise ValueError("expectations require at least one actual assertion")
