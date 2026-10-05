@@ -1,5 +1,15 @@
 # Authenticated access policies and workflow invariants
 
+Workflow variable dependencies are checked before any request or session reset.
+`{{name}}` in request URLs, bodies, headers, browser plans and expectations must
+refer to a named initial `variables` value or a JSON/DOM capture from an earlier
+step in the same workflow. A step's own captures become available only after its
+expectations pass. Captures can replace prior values, but a step cannot assign
+one variable from both JSON and DOM. Exact substitutions preserve JSON types;
+URL substitutions remain encoded. This checks declared dependencies, not whether
+a live response actually contains the requested JSON Pointer or DOM element;
+missing runtime values still stop that workflow as inconclusive.
+
 `workflow-run` issues real HTTP requests with isolated cookie jars. The same engine
 is available in `run` and `auto-run` through `--workflow-manifest assessment.json`.
 Credentials are supplied by environment variable names, never stored in the

@@ -201,9 +201,8 @@ class WorkflowExecutionTests(unittest.TestCase):
         config["access_cases"] = []
         config["workflows"] = [{"id": "missing-capture", "identity": "owner", "steps": [
             {"request": {"url": "https://app.example.test/{{missing}}"}, "expect": {"statuses": [200]}}]}]
-        result = self.run_case(config)
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["requests"], 0)
+        with self.assertRaises(ValueError):
+            self.run_case(config)
 
 
 class LiveWorkflowTransportTests(unittest.TestCase):
