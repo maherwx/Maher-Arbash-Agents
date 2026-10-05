@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from .active_testing import _dalfox_findings, _directory_discovery, _exec, _nuclei_findings
 from .scope_policy import filter_in_scope_urls
+from .zap_cli import run_zap_baseline
 
 
 # Agents choose from fixed local tools. Requests never contain shell commands,
@@ -256,6 +257,8 @@ def run_agent_tool_requests(
 
     for row in requests:
         tool = str(row.get("tool", "")).strip().lower()
+        if tool in {"zap", "zaproxy", "zap.sh"}:
+            tool = "zap-baseline.py"
         if tool not in SUPPORTED_AGENT_TOOLS:
             decisions.append({"agent": row.get("agent"), "tool": tool or None, "status": "rejected", "reason": "tool_not_allowlisted"})
             continue
@@ -522,15 +525,7 @@ def run_agent_tool_requests(
             seen_zap_origins.add(origin)
             zap_targets.append(url)
     for index, scan_url in enumerate(zap_targets[:MAX_ZAP_ORIGINS], start=1):
-        if shutil.which("zap-baseline.py"):
-            output_json = root / f"zap-agent-followup-{index}.json"
-            output_html = root / f"zap-agent-followup-{index}.html"
-            runs.append(_exec([
-                "zap-baseline.py", "-t", scan_url, "-m", "2", "-T", "30",
-                "-J", str(output_json), "-r", str(output_html),
-            ], timeout=180))
-        else:
-            runs.append({"tool": "zap-baseline.py", "status": "missing", "target": scan_url, "reason": "agent-requested ZAP baseline; binary not installed"})
+        runs.append(run_zap_baseline(scan_url, root, scope, _exec))
     return {
         "mode": "allowlisted_shell_tool_followups",
         "request_count": len(requests),

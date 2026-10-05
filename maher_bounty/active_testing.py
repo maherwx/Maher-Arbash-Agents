@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from .scope_policy import filter_in_scope_urls, scope_target_urls
 from .tool_advisor import recommend_tools
 from .process_runtime import run as run_process, OutputLimitExceeded
+from .zap_cli import run_zap_baseline
 
 SAFE_CONTENT_PATHS = (
     "robots.txt", "sitemap.xml", "security.txt", ".well-known/security.txt",
@@ -288,11 +289,7 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
             })
             nikto_out = host_dir / "nikto.txt"
             runs.append(_exec(["nikto", "-h", scan_target, "-nointeractive"], timeout=120, output=nikto_out))
-            if shutil.which("zap-baseline.py"):
-                runs.append(_exec([
-                    "zap-baseline.py", "-t", scan_target, "-m", "2", "-T", "30",
-                    "-J", str(host_dir / "zap-baseline.json"), "-r", str(host_dir / "zap-baseline.html"),
-                ], timeout=180))
+            runs.append(run_zap_baseline(scan_target, host_dir, scope, _exec))
         else:
             for tool in ("katana", "ffuf/gobuster", "nikto", "zap-baseline.py"):
                 runs.append({
