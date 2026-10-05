@@ -25,6 +25,8 @@ class BrowserTransport:
         self.transactions = []
         self.contexts, self.pages = {}, {}
         self.pending = {}
+        self._closing = set()
+        self._closed = False
         self._pw = sync_playwright().start()
         self.browser = None
         try:
@@ -39,6 +41,26 @@ class BrowserTransport:
         return is_in_scope_url(url, self.scope) and _origin(url) == _origin(self.identities[name]["origin"])
 
     def _route(self, name, route):
+        if name in self._closing:
+            try:
+                route.abort()
+            except self.error_type:
+                pass
+            return
+        failed_before = self.failed
+        try:
+            self._serve_route(name, route)
+        except self.error_type:
+            # A request may be cancelled between fetch and fulfill/abort.
+            # Never emit raw Playwright errors containing request details.
+            if self.failed == failed_before:
+                self.failed += 1
+            try:
+                route.abort()
+            except self.error_type:
+                pass
+
+    def _serve_route(self, name, route):
         request = route.request
         if not self._allowed(name, request.url) or self.count >= self.budget or time.monotonic() >= self.deadline:
             self.blocked += 1
@@ -73,8 +95,9 @@ class BrowserTransport:
         route.fulfill(response=response)
 
     def reset(self, name):
-        if name in self.contexts:
-            self.contexts.pop(name).close()
+        if self._closed:
+            raise RuntimeError("browser transport is closed")
+        self._dispose_context(name)
         identity = self.identities[name]
         headers = {}
         cookies = []
@@ -112,6 +135,8 @@ class BrowserTransport:
         self.pages[name] = page
 
     def __call__(self, name, spec):
+        if self._closed:
+            raise RuntimeError("browser transport is closed")
         if not self._allowed(name, spec["url"]):
             raise ValueError("browser request outside identity origin/scope")
         if spec.get("method", "GET").upper() != "GET" or "body" in spec:
@@ -184,7 +209,35 @@ class BrowserTransport:
                 "failed_requests": self.failed,
                 "transactions": self.transactions}
 
+    def _dispose_context(self, name):
+        context = self.contexts.pop(name, None)
+        self.pages.pop(name, None)
+        self.pending.pop(name, None)
+        if context is None:
+            return
+        self._closing.add(name)
+        try:
+            # Removing routing without first disabling traffic would allow
+            # application polling to bypass the credential-origin guard.
+            context.set_offline(True)
+            context.unroute_all(behavior="ignoreErrors")
+        except self.error_type:
+            pass
+        finally:
+            try:
+                context.close()
+            except self.error_type:
+                pass
+            self._closing.discard(name)
+
     def close(self):
-        if self.browser:
-            self.browser.close()
-        self._pw.stop()
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            for name in list(self.contexts):
+                self._dispose_context(name)
+            if self.browser:
+                self.browser.close()
+        finally:
+            self._pw.stop()

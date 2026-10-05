@@ -82,6 +82,15 @@ network evidence incomplete. Resetting an identity installs a new tracker with
 its new context, so old-context completion callbacks cannot alter the new
 session's tracker. The network-idle option must be a JSON boolean and is
 validated before starting traffic.
+
+Context reset and transport shutdown use the same disposal path. It marks the
+context as closing and sets it offline before removing route handlers, so new
+polling traffic cannot bypass origin routing during disposal. In-flight handler
+errors are detached with Playwright's `ignoreErrors` behavior before context
+closure; cleanup does not wait indefinitely for cancelled callbacks. Normal
+route cancellation is converted to incomplete network diagnostics without raw
+exception text. Closing the transport repeatedly is safe, clears retained
+context/page/pending-request state, and prevents further use or reset.
 The summary also retains a sanitized network timeline: identity, HTTP method,
 resource type, status and URL with query values redacted. This exposes endpoints
 reached through JavaScript and forms to the research context without replaying
