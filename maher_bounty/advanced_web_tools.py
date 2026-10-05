@@ -239,7 +239,7 @@ def audit_response_posture(records: list[dict]) -> dict:
 
 
 def correlate_parameter_behavior(records: list[dict]) -> dict:
-    grouped = defaultdict(lambda: defaultdict(set))
+    grouped = defaultdict(set)
     for record in records[:20000]:
         req_headers, req_body, _ = _http_parts(str(record.get("request_raw") or ""), "request")
         signature = _response_signature(record)
