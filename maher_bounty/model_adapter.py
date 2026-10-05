@@ -87,6 +87,8 @@ _SYSTEM_PROMPT = (
     "When source_structure is present, use supplied local import edges, declared route locations "
     "and priority files to organize code review. Route declarations are unverified and may have "
     "runtime prefixes or wrappers; do not convert them into executable targets or claim a call graph. "
+    "Source traffic_correspondence links declaration patterns to supplied scoped target refs only; "
+    "it does not verify that the source is the deployed handler or that a candidate is exploitable. "
     "When execution_feedback is supplied, review actual completed tool runs and peers' evidence, "
     "then request a complementary unattempted check only when those results justify it. "
     "If can_schedule_next_round is false, return no tool_requests and summarize execution evidence. "

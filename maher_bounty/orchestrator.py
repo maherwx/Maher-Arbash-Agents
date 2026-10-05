@@ -23,6 +23,8 @@ from .advanced_analysis import build_application_intelligence, normalize_evidenc
 from .advanced_web_tools import run_advanced_web_tools
 from .workflow_execution import execute_workflows, validate_manifest
 from .source_review import review_source
+from .source_correlation import correlate_source_traffic
+from .artifact_io import write_json_atomic
 
 
 def load_agents():
@@ -158,6 +160,14 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 json.dumps(traffic_evidence, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             store.checkpoint(run_id, "burp_traffic_evidence", traffic_evidence)
+
+        if source_dir:
+            correlation = correlate_source_traffic(source_review, traffic_evidence, traffic_target_refs, scope)
+            source_review = {**{key: value for key, value in source_review.items() if key != "artifact_generation"},
+                             "static_artifact_generation": source_review.get("artifact_generation"),
+                             "traffic_correspondence": correlation}
+            write_json_atomic(out / "source" / "source-traffic-correspondence.json", correlation)
+            store.checkpoint(run_id, "source_traffic_correspondence", correlation)
 
         active_testing = {"status": "skipped", "reason": "allow_active_discovery=false", "findings": []}
         if active_enabled:
