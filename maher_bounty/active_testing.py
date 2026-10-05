@@ -24,13 +24,13 @@ def _tail(value, limit: int = 3000) -> str:
     return str(value or "")[-limit:]
 
 
-def _exec(cmd: list[str], *, timeout: int, output: Path | None = None) -> dict:
+def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_text: str | None = None) -> dict:
     tool = cmd[0]
     if not shutil.which(tool):
         return {"tool": tool, "status": "missing", "command": cmd, "findings": 0, "stderr_tail": ""}
     print(f"[ACTIVE] {tool:<12} RUN timeout={timeout}s", flush=True)
     try:
-        cp = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        cp = subprocess.run(cmd, input=input_text, capture_output=True, text=True, timeout=timeout, check=False)
         combined = (cp.stdout or "") + ("\n" + cp.stderr if cp.stderr else "")
         if output:
             output.parent.mkdir(parents=True, exist_ok=True)
