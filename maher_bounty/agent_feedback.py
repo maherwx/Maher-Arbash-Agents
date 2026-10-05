@@ -42,6 +42,7 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
     context["runs"] = list(context.get("runs", []))
     aggregate = {"mode": "bounded_local_execution_feedback", "request_count": 0,
                  "runs": [], "findings": [], "decisions": [], "rounds": [],
+                 "remaining_deferred_request_count": 0,
                  "new_in_scope_urls": [], "rejected_inventory_url_count": len(rejected)}
     if reviewer is not None:
         aggregate["review_rounds"] = []
@@ -87,6 +88,7 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
 
     for index in range(start, max_rounds):
         submitted = []
+        proposed = set()
         for row in pending:
             if not isinstance(row, dict) or not isinstance(row.get("tool_requests", []), list):
                 continue
@@ -121,8 +123,8 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
                     if not isinstance(target, str):
                         continue
                     key = (tool, _coverage_key(tool, target))
-                    if key not in attempted:
-                        attempted.add(key)
+                    if key not in attempted and key not in proposed:
+                        proposed.add(key)
                         fresh_targets.append(target)
                 if fresh_targets:
                     # References are resolved once before attempt deduplication.
@@ -131,11 +133,27 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
                 submitted.append({**row, "tool_requests": requests})
         if not submitted:
             stop = "no_unattempted_requests"
+            aggregate["remaining_deferred_request_count"] = 0
             break
         save("running_round", index)
         summary = run_agent_tool_requests(submitted, known, Path(out_dir) / f"round-{index + 1}",
                                           scope=scope, active_testing=context, tool_plan=tool_plan,
                                           target_references=target_references)
+        # Only admitted execution counts as an attempt. A request beyond a
+        # round's budget must remain eligible for a later round.
+        admitted = summary.get("attempted_targets")
+        if isinstance(admitted, list):
+            for item in admitted:
+                if isinstance(item, dict) and isinstance(item.get("tool"), str) and isinstance(item.get("target"), str):
+                    attempted.add((item["tool"], _coverage_key(item["tool"], item["target"])))
+        else:
+            # Compatibility for older router implementations without admission metadata.
+            attempted.update(proposed)
+        deferred = summary.get("deferred_requests", [])
+        deferred = [row for row in deferred if isinstance(row, dict)] if isinstance(deferred, list) else []
+        deferred_count = sum(len(row["tool_requests"]) for row in deferred
+                             if isinstance(row.get("tool_requests"), list))
+        aggregate["remaining_deferred_request_count"] = deferred_count
         for key in ("runs", "findings", "decisions"):
             aggregate[key].extend(summary.get(key, []))
         aggregate["request_count"] += summary.get("request_count", 0)
@@ -147,6 +165,7 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
         known.extend(fresh)
         aggregate["new_in_scope_urls"].extend(fresh)
         aggregate["rounds"].append({"round": index + 1, "new_url_count": len(fresh),
+                                    "deferred_request_count": deferred_count,
                                     "run_count": len(summary.get("runs", [])),
                                     "finding_count": len(summary.get("findings", []))})
         reviews = []
@@ -168,10 +187,10 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
                                                    "error_type": type(exc).__name__})
         has_requests = any(bool(row.get("tool_requests")) for row in reviews
                            if isinstance(row.get("tool_requests"), list))
-        if not fresh and not has_requests:
+        if not fresh and not has_requests and not deferred:
             stop = "no_new_in_scope_evidence"
             break
-        pending = [*reviews, *build_local_tool_requests(known, scope=scope, active_testing=context,
+        pending = [*deferred, *reviews, *build_local_tool_requests(known, scope=scope, active_testing=context,
                                                        tool_plan=tool_plan)["agent_results"]]
         save("completed_round", index + 1)
     aggregate["stop_reason"] = stop

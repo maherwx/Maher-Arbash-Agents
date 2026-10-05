@@ -40,7 +40,7 @@ def _coverage_key(tool: str, url: str) -> str:
     return url
 
 
-def _request_rows(results: list[dict]) -> list[dict]:
+def _request_rows(results: list[dict], limit=MAX_AGENT_REQUESTS) -> list[dict]:
     # Share the request budget across roles, including repeated packets from
     # the same role. A request cannot impersonate another agent.
     queues = {}
@@ -57,13 +57,13 @@ def _request_rows(results: list[dict]) -> list[dict]:
             if isinstance(request, dict) and len(queue) < MAX_AGENT_REQUESTS:
                 queue.append({**request, "agent": agent})
     rows = []
-    while len(rows) < MAX_AGENT_REQUESTS:
+    while len(rows) < limit:
         progressed = False
         for queue in queues.values():
             if queue:
                 rows.append(queue.popleft())
                 progressed = True
-            if len(rows) == MAX_AGENT_REQUESTS:
+            if len(rows) == limit:
                 break
         if not progressed:
             break
@@ -133,7 +133,7 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
             if not host and command:
                 host = command[-1]
             if host:
-                covered[tool].add(str(host).lower())
+                covered[tool].add(_coverage_key(tool, str(host)))
             continue
         else:
             target = run.get("target") or run.get("url")
@@ -273,11 +273,16 @@ def run_agent_tool_requests(
     allowed, rejected = filter_in_scope_urls(known_urls, scope)
     known = set(allowed)
     covered = _prior_coverage(active_testing or {}, known, tool_plan)
-    requests = _request_rows(agent_results)
+    request_pool = _request_rows(agent_results, limit=120 * MAX_AGENT_REQUESTS)
+    requests = request_pool[:MAX_AGENT_REQUESTS]
+    deferred = [{"agent": row["agent"], "tool_requests": [{
+        key: value for key, value in row.items() if key in {"tool", "targets", "target_refs", "reason"}
+    }]} for row in request_pool[MAX_AGENT_REQUESTS:]]
     selected = {tool: [] for tool in SUPPORTED_AGENT_TOOLS}
     decisions = []
     seen = {name: set() for name in selected}
     target_budget = MAX_AGENT_TARGETS
+    deferred_seen = {name: set() for name in selected}
 
     for row in requests:
         tool = str(row.get("tool", "")).strip().lower()
@@ -305,6 +310,8 @@ def run_agent_tool_requests(
         candidates.extend(value for value in resolved_refs if value)
         in_scope, out_scope = filter_in_scope_urls(candidates, scope)
         eligible = []
+        postponed = []
+        capacity = MAX_AGENT_TARGETS if tool in {"httpx", "nuclei", "dalfox"} else MAX_FOLLOWUP_ORIGINS
         for url in in_scope:
             if url not in known:
                 continue
@@ -318,10 +325,20 @@ def run_agent_tool_requests(
                 decisions.append({"agent": row.get("agent"), "tool": tool, "target": url, "status": "skipped", "reason": "already_covered_in_base_scan"})
                 continue
             dedupe_key = coverage_key or url
-            if dedupe_key not in seen[tool] and target_budget > 0:
+            if dedupe_key in seen[tool]:
+                continue
+            if target_budget > 0 and len(selected[tool]) + len(eligible) < capacity:
                 seen[tool].add(dedupe_key)
                 eligible.append(url)
                 target_budget -= 1
+            elif dedupe_key not in deferred_seen[tool]:
+                deferred_seen[tool].add(dedupe_key)
+                postponed.append(url)
+        if postponed:
+            deferred.append({"agent": row.get("agent"), "tool_requests": [{
+                "tool": tool, "targets": postponed, "reason": "deferred by round execution budget"}]})
+            decisions.append({"agent": row.get("agent"), "tool": tool, "status": "deferred",
+                              "target_count": len(postponed), "reason": "round_execution_budget"})
         if unknown_ref_count or out_scope or any(value not in known for value in candidates if value not in out_scope):
             decisions.append({
                 "agent": row.get("agent"), "tool": tool, "status": "filtered",
@@ -335,7 +352,7 @@ def run_agent_tool_requests(
                 "agent": row.get("agent"), "tool": tool, "status": "queued",
                 "target_count": len(eligible), "reason": str(row.get("reason", ""))[:300],
             })
-        elif not out_scope and not any(
+        elif not postponed and not out_scope and not any(
             item.get("tool") == tool and item.get("target") in candidates and item.get("reason") in {
                 "already_covered_in_base_scan", "origin_already_covered_in_base_scan",
             } for item in decisions
@@ -555,10 +572,19 @@ def run_agent_tool_requests(
             zap_targets.append(url)
     for index, scan_url in enumerate(zap_targets[:MAX_ZAP_ORIGINS], start=1):
         runs.append(run_zap_baseline(scan_url, root, scope, _exec))
+    deferred_by_agent = {}
+    for row in deferred:
+        deferred_by_agent.setdefault(row["agent"], []).extend(row["tool_requests"])
+    # Preserve one result packet per role so the next round's packet limit
+    # cannot silently drop a long list of deferred single-request packets.
+    deferred = [{"agent": agent, "tool_requests": rows} for agent, rows in deferred_by_agent.items()]
     return {
         "mode": "allowlisted_shell_tool_followups",
         "request_scheduling": "round_robin_by_role",
         "requesting_agent_count": len({row["agent"] for row in requests}),
+        "deferred_requests": deferred,
+        "attempted_targets": [{"tool": tool, "target": url} for tool, urls in selected.items() for url in urls]
+                             + [{"tool": "nuclei", "target": url} for url in new_crawl_urls],
         "request_count": len(requests),
         "known_in_scope_url_count": len(known),
         "rejected_inventory_url_count": len(rejected),
