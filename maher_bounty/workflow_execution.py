@@ -356,11 +356,16 @@ def validate_manifest(manifest, scope):
         names.add(workflow["id"])
         if workflow.get("identity") not in identities or not workflow.get("steps"):
             raise ValueError("workflow requires a known identity and ordered steps")
+        cleanup = workflow.get("cleanup_steps", [])
+        if not isinstance(workflow["steps"], list) or not isinstance(cleanup, list):
+            raise ValueError("workflow steps and cleanup_steps must be lists")
         initial = workflow.get("variables", {})
         if not isinstance(initial, dict) or any(not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) for key in initial):
             raise ValueError("workflow variables require valid named values")
         available = set(initial)
-        for step in workflow["steps"]:
+        for step in workflow["steps"] + cleanup:
+            if not isinstance(step, dict):
+                raise ValueError("workflow steps must be objects")
             if not step.get("expect"):
                 raise ValueError("every workflow step requires expected behavior")
             _validate_expectation(step["expect"])
@@ -575,7 +580,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
     sender = transport or Transport(manifest["identities"], timeout=timeout, budget=budget,
                                    interval=max(0.1, float(limits.get("interval_seconds", 0.2))), deadline=deadline,
                                    proxy=manifest.get("proxy"))
-    observations, findings, decisions = [], [], []
+    observations, findings, decisions, cleanup_decisions = [], [], [], []
     count = 0
 
     def send(identity, spec):
@@ -584,6 +589,28 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
             raise RuntimeError("assessment budget exhausted")
         count += 1
         return sender(identity, spec)
+
+    def perform_step(workflow, step, index, variables, rows):
+        name = step.get("identity", workflow["identity"])
+        request = _resolve(step["request"], variables)
+        if (not is_in_scope_url(request["url"], scope)
+                or _origin(request["url"]) != _origin(manifest["identities"][name]["origin"])):
+            raise ValueError("resolved workflow request escaped scope or origin")
+        expected = _resolve(step["expect"], variables)
+        _validate_expectation(expected)
+        response = send(name, request)
+        checks = _assertions(response, expected)
+        rows.append({"step": index, "identity": name, **_observation(response, checks)})
+        if response.get("truncated") or response.get("network_incomplete") or not checks:
+            raise RuntimeError("incomplete workflow evidence")
+        passed = all(c["passed"] for c in checks)
+        if passed:
+            if step.get("capture"):
+                document = _decode_json(response["body"])
+                for variable, pointer in step["capture"].items():
+                    variables[variable] = _pointer_value(document, pointer)
+            variables.update(response.get("captured", {}))
+        return passed
 
     for case in manifest.get("access_cases", []):
         rows, control = [], None
@@ -631,42 +658,40 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
             # Reset each participating session once, preserving it when switching
             # back to that identity later in the same application lifecycle.
             if hasattr(sender, "reset"):
-                participants = dict.fromkeys(step.get("identity", workflow["identity"]) for step in workflow["steps"])
+                participants = dict.fromkeys(step.get("identity", workflow["identity"]) for step in workflow["steps"] + workflow.get("cleanup_steps", []))
                 for name in participants:
                     sender.reset(name)
             for index, step in enumerate(workflow["steps"]):
-                name = step.get("identity", workflow["identity"])
-                request = _resolve(step["request"], variables)
-                if (not is_in_scope_url(request["url"], scope)
-                        or _origin(request["url"]) != _origin(manifest["identities"][name]["origin"])):
-                    raise ValueError("resolved workflow request escaped scope or origin")
-                expected = _resolve(step["expect"], variables)
-                _validate_expectation(expected)
-                response = send(name, request)
-                checks = _assertions(response, expected)
-                rows.append({"step": index, "identity": name, **_observation(response, checks)})
-                if response.get("truncated") or response.get("network_incomplete") or not checks:
-                    raise RuntimeError("incomplete workflow evidence")
-                if not all(c["passed"] for c in checks):
+                if not perform_step(workflow, step, index, variables, rows):
                     findings.append({"source": "workflow_execution", "title": f"Workflow invariant violated: {workflow['id']} step {index}",
                                      "target": _safe_url(step["request"]["url"]), "severity": "medium", "validated": False,
                                      "evidence": {"workflow_id": workflow["id"], "observations": rows.copy()},
                                      "basis": "explicit invariant failed; requires impact review"})
                     decisions.append({"id": workflow["id"], "status": "invariant_failed", "step": index})
                     break
-                if step.get("capture"):
-                    document = _decode_json(response["body"])
-                    for variable, pointer in step["capture"].items():
-                        variables[variable] = _pointer_value(document, pointer)
-                variables.update(response.get("captured", {}))
             else:
                 decisions.append({"id": workflow["id"], "status": "completed"})
         except (OSError, URLError, RuntimeError, ValueError, KeyError, IndexError, TypeError, HTTPException) as exc:
             decisions.append({"id": workflow["id"], "status": "inconclusive", "error_type": type(exc).__name__})
-        observations.append({"id": workflow["id"], "observations": rows})
+        entry = {"id": workflow["id"], "observations": rows}
+        if workflow.get("cleanup_steps"):
+            cleanup_rows = []
+            try:
+                for index, step in enumerate(workflow["cleanup_steps"]):
+                    if not perform_step(workflow, step, index, variables, cleanup_rows):
+                        cleanup_decisions.append({"id": workflow["id"], "status": "invariant_failed", "step": index})
+                        break
+                else:
+                    cleanup_decisions.append({"id": workflow["id"], "status": "completed"})
+            except (OSError, URLError, RuntimeError, ValueError, KeyError, IndexError, TypeError, HTTPException) as exc:
+                cleanup_decisions.append({"id": workflow["id"], "status": "inconclusive", "error_type": type(exc).__name__})
+            entry["cleanup_observations"] = cleanup_rows
+        observations.append(entry)
 
-    result = {"status": "partial" if any(d["status"] == "inconclusive" for d in decisions) else "completed",
+    result = {"status": "partial" if any(d["status"] == "inconclusive" for d in decisions) or any(d["status"] != "completed" for d in cleanup_decisions) else "completed",
               "requests": count, "decisions": decisions, "observations": observations, "findings": findings}
+    if cleanup_decisions:
+        result["cleanup_decisions"] = cleanup_decisions
     if hasattr(sender, "summary"):
         result["transport"] = sender.summary()
     root = Path(out_dir)

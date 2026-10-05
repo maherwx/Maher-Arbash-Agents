@@ -23,6 +23,8 @@ class LiveWorkflowBenchmarkTests(unittest.TestCase):
             candidate = next(row for row in result["results"] if row["case"] == "unprotected_state")
             self.assertEqual(candidate["confirmed_findings"], 0)
             self.assertEqual(candidate["candidate_findings"], 1)
+            self.assertTrue(candidate["cleanup_verified"])
+            self.assertTrue(next(row for row in result["results"] if row["case"] == "protected_state")["cleanup_verified"])
         self.assertEqual(previous, {key: value for key, value in os.environ.items() if key.startswith("MAHER_BENCH_")})
 
     def test_http_live_access_and_state_quality(self):

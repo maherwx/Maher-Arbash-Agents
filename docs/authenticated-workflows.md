@@ -1,5 +1,26 @@
 # Authenticated access policies and workflow invariants
 
+Each workflow can declare `cleanup_steps`, using the same request, expectation,
+identity and capture structure as its main steps. They execute after normal
+completion, invariant failure or handled transport/capture errors, using the
+same sessions and successfully captured variables. For example, a step that
+captures `id` from a created test object can be paired with:
+
+```json
+"cleanup_steps": [
+  {"request": {"url": "https://your-authorized-host.example/objects/{{id}}", "method": "DELETE"},
+   "expect": {"statuses": [204]}}
+]
+```
+
+All cleanup steps are preflighted before main traffic, with the same exact
+origin, scope, credentials, request count and elapsed budgets. They cannot
+force requests after exhaustion or invent a missing captured ID. Separate
+`cleanup_decisions` and `cleanup_observations` record the result. Failed or
+incomplete cleanup makes the run partial without creating a vulnerability or
+erasing earlier findings. This is explicit best-effort cleanup, not guaranteed
+rollback after interruption or process crash. Keep enough run budget for it.
+
 Access-policy evidence repeats each forbidden identity's resource proof twice.
 Two matches can confirm a policy violation; two misses complete that check
 without a finding. One match and one miss are inconclusive, stop that case and

@@ -17,6 +17,10 @@ HTTP 200, fluctuating forbidden access, an invalid allowed control, protected
 state and unauthorized state modification. Browser state cases fill/click a
 page that sends a real PATCH; HTTP cases send PATCH directly. Values captured
 from JSON or DOM link the owner/other/owner resource lifecycle.
+State scenarios also restore the initial state with explicit owner cleanup
+steps, including after an invariant failure. The quality gate checks cleanup
+evidence and actual fixture state; a correct detection with failed cleanup
+does not pass the benchmark.
 
 `workflow-benchmark.json` records expected versus observed classifications,
 confirmed access findings, state invariant candidates, false positive cases
