@@ -1,5 +1,9 @@
 # Authenticated access policies and workflow invariants
 
+The same manifest can configure a supplied identity and session control for
+[authenticated browser execution checks](authenticated-browser-checks.md),
+integrated with the local agent tool coordinator.
+
 Ordered workflows can check exact integer state changes across steps using
 `json_delta`. Capture a counter, version or balance in minor currency units
 from a successful earlier response, then compare a later value to that baseline:

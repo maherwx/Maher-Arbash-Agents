@@ -8,9 +8,10 @@ from .execution_journal import ExecutionJournal
 
 def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testing=None,
                             tool_plan=None, target_references=None, max_rounds=3, reviewer=None,
-                            checkpoint_path=None, resume=False, checkpoint_context=None):
+                            checkpoint_path=None, resume=False, checkpoint_context=None, browser_xss_profile=None):
     options = dict(scope=scope, active_testing=active_testing, tool_plan=tool_plan,
-                   target_references=target_references, max_rounds=max_rounds, reviewer=reviewer)
+                   target_references=target_references, max_rounds=max_rounds, reviewer=reviewer,
+                   browser_xss_profile=browser_xss_profile)
     if checkpoint_path is None:
         if resume:
             raise ValueError("execution resume requires a checkpoint path")
@@ -21,6 +22,7 @@ def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testi
                "tool_plan": tool_plan, "target_references": target_references,
                "max_rounds": max_rounds, "model_review_enabled": reviewer is not None,
                "execution_policy": checkpoint_context,
+               "browser_xss_profile": browser_xss_profile,
                "out_dir": str(Path(out_dir).resolve())}
     with ExecutionJournal(checkpoint_path, binding) as journal:
         restored = journal.load() if resume else None
@@ -30,7 +32,7 @@ def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testi
 
 def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testing=None,
                              tool_plan=None, target_references=None, max_rounds=3,
-                             reviewer=None, journal=None, restored=None):
+                             reviewer=None, journal=None, restored=None, browser_xss_profile=None):
     if type(max_rounds) is not int or not 1 <= max_rounds <= 3:
         raise ValueError("agent feedback requires one to three rounds")
     if reviewer is not None and not callable(reviewer):
@@ -144,7 +146,7 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
         save("running_round", index)
         summary = run_agent_tool_requests(submitted, known, Path(out_dir) / f"round-{index + 1}",
                                           scope=scope, active_testing=context, tool_plan=tool_plan,
-                                          target_references=target_references)
+                                          target_references=target_references, browser_xss_profile=browser_xss_profile)
         # Only admitted execution counts as an attempt. A request beyond a
         # round's budget must remain eligible for a later round.
         admitted = summary.get("attempted_targets")
@@ -199,7 +201,7 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
             stop = "no_new_in_scope_evidence"
             break
         pending = [*deferred, *reviews, *build_local_tool_requests(known, scope=scope, active_testing=context,
-                                                       tool_plan=tool_plan)["agent_results"]]
+                                                       tool_plan=tool_plan, browser_xss_profile=browser_xss_profile)["agent_results"]]
         save("completed_round", index + 1)
     aggregate["stop_reason"] = stop
     aggregate["known_in_scope_url_count"] = len(initial | set(aggregate["new_in_scope_urls"]))

@@ -22,6 +22,7 @@ from .burp_evidence import build_scoped_traffic_evidence, build_traffic_target_r
 from .advanced_analysis import build_application_intelligence, normalize_evidence, validate_evidence, build_agent_workstreams, write_advanced_artifacts
 from .advanced_web_tools import run_advanced_web_tools
 from .workflow_execution import execute_workflows, validate_manifest
+from .browser_xss import load_browser_xss_profile
 from .source_review import review_source
 from .source_correlation import correlate_source_traffic
 from .artifact_io import write_json_atomic
@@ -122,9 +123,11 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         scope["assets"] = [target]
     scope.setdefault("out_of_scope", [])
     workflow_manifest = None
+    browser_xss_profile = None
     if workflow_manifest_path:
         workflow_manifest = json.loads(Path(workflow_manifest_path).read_text(encoding="utf-8"))
         validate_manifest(workflow_manifest, scope)
+        browser_xss_profile = load_browser_xss_profile(workflow_manifest, scope)
     imported_traffic = ingest_traffic(traffic_path, kind="auto") if traffic_path else None
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -295,6 +298,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 scope=scope,
                 active_testing=active_testing,
                 tool_plan=inventory.get("tool_plan", {}),
+                browser_xss_profile=browser_xss_profile,
             )
             if source_dir:
                 source_tool_plan = build_source_check_plan(source_review, traffic_evidence, traffic_target_refs,
@@ -307,6 +311,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                 active_testing=active_testing,
                 tool_plan=inventory.get("tool_plan", {}),
                 target_references=traffic_target_refs,
+                browser_xss_profile=browser_xss_profile,
                 checkpoint_path=out / "active" / "agent-followups" / "execution-state.json",
                 checkpoint_context=rules,
                 **({"reviewer": review_execution_round} if model.enabled else {}),

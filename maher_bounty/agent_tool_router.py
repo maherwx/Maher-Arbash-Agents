@@ -16,7 +16,7 @@ from .browser_xss import run_browser_xss
 # Agents choose from fixed local tools. Requests never contain shell commands,
 # executable paths, arbitrary flags, payloads, or new target hosts.
 SUPPORTED_AGENT_TOOLS = {
-    "browser-xss",
+    "browser-xss", "browser-xss-auth",
     "hakrawler", "katana", "httpx", "nuclei", "dalfox", "zap-baseline.py",
     "nikto", "nmap", "tlsx", "whatweb", "wafw00f", "dnsx", "naabu", "ffuf", "gobuster",
     "subfinder", "assetfinder", "waybackurls", "gau", "alterx",
@@ -85,7 +85,8 @@ def _read_target_file(command: list[str], flag: str) -> set[str]:
         return set()
 
 
-def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | None = None) -> dict[str, set[str]]:
+def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | None = None,
+                    browser_xss_profile: dict | None = None) -> dict[str, set[str]]:
     covered = {tool: set() for tool in SUPPORTED_AGENT_TOOLS}
     run_rows = [
         *(active_testing.get("runs", []) if isinstance(active_testing, dict) else []),
@@ -105,7 +106,10 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
         if not isinstance(command, list):
             command = []
         targets = set()
-        if tool == "browser-xss":
+        if tool in {"browser-xss", "browser-xss-auth"}:
+            if tool == "browser-xss-auth" and (browser_xss_profile is None
+                    or run.get("profile_sha256") != browser_xss_profile.get("profile_sha256")):
+                continue
             covered[tool].update(url for url in known if hashlib.sha256(url.encode()).hexdigest() == run.get("target_sha256"))
             continue
         if tool == "nuclei":
@@ -160,6 +164,7 @@ def build_local_tool_requests(
     scope: dict,
     active_testing: dict | None = None,
     tool_plan: dict | None = None,
+    browser_xss_profile: dict | None = None,
 ) -> dict:
     """Build a no-model local follow-up plan from evidence and actual coverage.
 
@@ -169,7 +174,7 @@ def build_local_tool_requests(
     """
     allowed, rejected = filter_in_scope_urls(known_urls, scope)
     known = set(allowed)
-    covered = _prior_coverage(active_testing or {}, known, tool_plan)
+    covered = _prior_coverage(active_testing or {}, known, tool_plan, browser_xss_profile)
     origin_urls = []
     seen_origins = set()
     for url in allowed:
@@ -179,6 +184,9 @@ def build_local_tool_requests(
             origin_urls.append(url)
 
     candidates_by_tool = {
+        "browser-xss-auth": [url for url in allowed if urlparse(url).query
+                             and browser_xss_profile is not None
+                             and _origin(url) == _origin(browser_xss_profile["identity"]["origin"])],
         "browser-xss": [url for url in allowed if urlparse(url).query],
         "nuclei": allowed,
         "dalfox": [url for url in allowed if urlparse(url).query],
@@ -209,7 +217,7 @@ def build_local_tool_requests(
     requests = []
     selected_targets = set()
     for tool in (
-        "nuclei", "dalfox", "browser-xss", "katana", "hakrawler", "zap-baseline.py",
+        "browser-xss-auth", "nuclei", "dalfox", "browser-xss", "katana", "hakrawler", "zap-baseline.py",
         "naabu", "dnsx", "alterx", "tlsx", "ffuf", "gobuster",
         "whatweb", "wafw00f", "nikto", "nmap", "httpx",
         "subfinder", "assetfinder", "waybackurls", "gau",
@@ -261,6 +269,7 @@ def run_agent_tool_requests(
     active_testing: dict | None = None,
     tool_plan: dict | None = None,
     target_references: dict[str, str] | None = None,
+    browser_xss_profile: dict | None = None,
 ) -> dict:
     """Run bounded, allowlisted shell-backed tool follow-ups on scoped URLs.
 
@@ -272,7 +281,7 @@ def run_agent_tool_requests(
     root.mkdir(parents=True, exist_ok=True)
     allowed, rejected = filter_in_scope_urls(known_urls, scope)
     known = set(allowed)
-    covered = _prior_coverage(active_testing or {}, known, tool_plan)
+    covered = _prior_coverage(active_testing or {}, known, tool_plan, browser_xss_profile)
     request_pool = _request_rows(agent_results, limit=120 * MAX_AGENT_REQUESTS)
     requests = request_pool[:MAX_AGENT_REQUESTS]
     deferred = [{"agent": row["agent"], "tool_requests": [{
@@ -290,6 +299,10 @@ def run_agent_tool_requests(
             tool = "zap-baseline.py"
         if tool not in SUPPORTED_AGENT_TOOLS:
             decisions.append({"agent": row.get("agent"), "tool": tool or None, "status": "rejected", "reason": "tool_not_allowlisted"})
+            continue
+        if tool == "browser-xss-auth" and browser_xss_profile is None:
+            decisions.append({"agent": row.get("agent"), "tool": tool, "status": "rejected",
+                              "reason": "supplied_browser_identity_profile_required"})
             continue
         raw_targets = row.get("targets", [])
         if isinstance(raw_targets, str):
@@ -316,7 +329,9 @@ def run_agent_tool_requests(
             if url not in known:
                 continue
             parsed = urlparse(url)
-            if tool in {"dalfox", "browser-xss"} and not parsed.query:
+            if tool in {"dalfox", "browser-xss", "browser-xss-auth"} and not parsed.query:
+                continue
+            if tool == "browser-xss-auth" and _origin(url) != _origin(browser_xss_profile["identity"]["origin"]):
                 continue
             if tool == "tlsx" and parsed.scheme.lower() != "https":
                 continue
@@ -361,6 +376,12 @@ def run_agent_tool_requests(
 
     runs, findings = [], []
     new_crawl_urls = []
+    for index, scan_url in enumerate(selected["browser-xss-auth"][:MAX_FOLLOWUP_ORIGINS], start=1):
+        check = run_browser_xss(scan_url, root / f"browser-xss-auth-{index}", scope=scope,
+                                authorized=True, profile=browser_xss_profile)
+        findings.extend(check.get("findings", []))
+        runs.append({key: value for key, value in check.items() if key != "findings"} | {
+            "target_sha256": hashlib.sha256(scan_url.encode()).hexdigest()})
     for index, scan_url in enumerate(selected["browser-xss"][:MAX_FOLLOWUP_ORIGINS], start=1):
         check = run_browser_xss(scan_url, root / f"browser-xss-{index}", scope=scope, authorized=True)
         findings.extend(check.get("findings", []))
