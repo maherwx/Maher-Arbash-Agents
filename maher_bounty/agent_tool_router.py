@@ -178,8 +178,13 @@ def _arjun_parameter_urls(path, source_url: str, scope: dict, known: set[str]) -
         if not isinstance(endpoint, str) or not isinstance(details, dict):
             telemetry["invalid_parameter_row_count"] += 1
             continue
-        candidate = urlsplit(endpoint)
-        if (_origin(endpoint) != _origin(source_url) or (candidate.path or "/") != source_path
+        try:
+            candidate = urlsplit(endpoint)
+            same_origin = _origin(endpoint) == _origin(source_url)
+        except ValueError:
+            telemetry["invalid_parameter_row_count"] += 1
+            continue
+        if (not same_origin or (candidate.path or "/") != source_path
                 or str(details.get("method", "")).upper() != "GET"):
             telemetry["invalid_parameter_row_count"] += 1
             continue
