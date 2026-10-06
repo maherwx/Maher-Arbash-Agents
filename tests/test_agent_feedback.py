@@ -50,8 +50,10 @@ class AgentFeedbackTests(unittest.TestCase):
         self.assertEqual(result["stop_reason"], "no_new_in_scope_evidence")
 
     def test_scope_rejection_stops_feedback(self):
-        with tempfile.TemporaryDirectory() as td, patch("maher_bounty.agent_feedback.run_agent_tool_requests", return_value={
-                "new_in_scope_urls": ["https://outside.example/"], "runs": [], "findings": []}) as execute:
+        with tempfile.TemporaryDirectory() as td, \
+             patch("maher_bounty.agent_feedback.run_agent_tool_requests", return_value={
+                 "new_in_scope_urls": ["https://outside.example/"], "runs": [], "findings": []}) as execute, \
+             patch("maher_bounty.agent_feedback.build_local_tool_requests", return_value={"agent_results": []}):
             result = run_agent_tool_feedback(self.request("katana", [self.origin]), [self.origin], td,
                                              scope={"assets": [self.origin]})
         self.assertEqual(execute.call_count, 1)
