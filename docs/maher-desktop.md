@@ -66,8 +66,10 @@ a worker subprocess, through argv arrays without a shell interpreter. Tool
 arguments, capabilities, execution budgets, scope policy and artifact formats
 are not rewritten by the form. One desktop job runs at a time. The event queue
 and background thread keep the window responsive; progress is an activity
-indicator, not a completion percentage. Captured logs are shown when the job
-ends, not streamed live. Previewing a command launches nothing.
+indicator, not a completion percentage. Standard output and error are streamed
+to the Execution tab while tools run. The live preview is capped at 200,000
+characters, while the final captured log remains subject to the desktop's 8 MiB
+process-output cap. Previewing a command launches nothing.
 
 Stop requests cancel the worker through the existing bounded process runtime.
 On POSIX the worker receives cooperative SIGTERM, allowing nested adapters to
