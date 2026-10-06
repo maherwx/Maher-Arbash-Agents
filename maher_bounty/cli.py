@@ -101,6 +101,7 @@ def build_parser():
     terminal.add_argument("--authorized", action="store_true")
     terminal.add_argument("--local-model", action="store_true", help="Require configured in-process GGUF reasoning")
     terminal.add_argument("--plan-only", action="store_true", help="Write plan without launching target tools")
+    terminal.add_argument("--resume", action="store_true", help="Resume native execution from a completed-round checkpoint with identical inputs")
     terminal.add_argument("--rounds", type=int, choices=[1, 2, 3], default=3)
     terminal.add_argument("--out", default="results/agent-tools")
 
@@ -155,8 +156,10 @@ def _main():
     if a.cmd == "agent-tools-run":
         result = run_agent_terminal(load_execution_json(a.targets), load_execution_json(a.scope), a.out,
             authorized=a.authorized, requests=load_execution_json(a.requests) if a.requests else None,
-            local_model=a.local_model, plan_only=a.plan_only, max_rounds=a.rounds)
+            local_model=a.local_model, plan_only=a.plan_only, max_rounds=a.rounds, resume=a.resume)
         print(json.dumps({"status": result["status"], "run_status_counts": result.get("run_status_counts", {}),
+                          "execution_resumed": result.get("execution_resumed", False),
+                          "execution_outcome": result.get("execution_outcome"),
                           "finding_report": result.get("finding_report"),
                           "out": a.out}, indent=2))
         return 0

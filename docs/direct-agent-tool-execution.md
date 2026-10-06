@@ -71,9 +71,9 @@ were exhaustively assessed. Inspect `run_status_counts`, execution decisions,
 stop reason and deferred work. A successful process exit is not a security result.
 Model reviews are separate from the adapters' actual findings. Outputs may contain
 sensitive URLs, tool output and model excerpts; keep them private. Checkpoints
-support existing programmatic recovery, but this command does not expose resume.
-Use a fresh output directory; a new invocation must not be treated as a continuation
-or automatically repeat uncertain prior mutation effects.
+support native completed-round recovery via `--resume`, as described below.
+Use a fresh output directory for a new invocation; existing state requires an
+explicit recovery request and must not automatically repeat uncertain effects.
 
 ## Complete recorded finding report
 
@@ -157,3 +157,34 @@ vulnerability absence, account authorization, exploit validity or application
 impact. Existing CLI exit behavior and execution budgets remain unchanged.
 This update received source/diff review only and is unverified at runtime;
 no tests, tool execution, models, applications or assessments ran.
+
+## Native execution recovery
+
+`--resume` exposes the existing completed-round journal recovery for the native
+fixed planner. Supply the same targets, scope, initial requests (if used), round
+limit and output directory as the original invocation. The existing binding,
+checksum, scope revalidation and exclusive journal lock still apply. An example
+command, not executed here:
+
+```sh
+maher-bounty agent-tools-run --targets targets.json --scope scope.json --authorized --rounds 3 --resume --out results/tools
+```
+
+Recovery requires a checkpoint marked `completed_round`. A checkpoint marked
+`running_round` has uncertain effects and is rejected; there is no automatic
+replay, stale-lock removal, rollback or exactly-once guarantee. A completed
+terminal checkpoint reuses saved execution results and regenerates evidence
+review/reports without restarting tools. A nonterminal completed-round checkpoint
+continues only within its original round budget. Changing tool availability can
+change the native initial plan and cause the binding check to reject recovery.
+
+`--resume` cannot be combined with `--plan-only` or `--local-model`; local model
+review history is not restored by this command. It retains the original plan
+artifact before validation and does not overwrite reports/results when journal
+validation fails. Successful recovery records `execution_resumed: true`; the CLI
+also prints the recorded execution outcome. The desktop form inherits the new
+option from the shared parser. This is recovery for direct agent execution only,
+not a resume switch for full reconnaissance or authenticated workflow runs.
+
+No runtime recovery or parser execution was performed. This extension received
+source/diff review only and remains unverified at runtime.

@@ -69,9 +69,11 @@ def _validate_packets(packets, known):
 
 
 def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=None,
-                       local_model=False, plan_only=False, max_rounds=3):
+                       local_model=False, plan_only=False, max_rounds=3, resume=False):
     if not authorized:
         raise AgentExecutionInputError("agent tool execution requires explicit authorization")
+    if type(resume) is not bool or (resume and (local_model or plan_only)):
+        raise AgentExecutionInputError("resume requires native execution without --local-model or --plan-only")
     if not isinstance(scope, dict) or not isinstance(targets, list) or not targets or len(targets) > 120:
         raise AgentExecutionInputError("scope object and 1-120 target URLs required")
     if any(not isinstance(url, str) or len(url) > 8192 for url in targets):
@@ -96,7 +98,10 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
     if requests is not None:
         _validate_packets(requests, set(known))
     root = Path(out_dir)
-    if not plan_only and (root / "execution" / "execution-state.json").exists():
+    checkpoint = root / "execution" / "execution-state.json"
+    if resume and not checkpoint.is_file():
+        raise AgentExecutionInputError("resume requires an existing execution-state.json in the original output directory")
+    if not resume and not plan_only and checkpoint.exists():
         raise AgentExecutionInputError("prior execution state exists; use a fresh output directory")
     model = LocalModelAdapter() if local_model else None
     if model is not None and not model.enabled:
@@ -134,15 +139,26 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
             "execution_policy": {"supported_tools": sorted(SUPPORTED_AGENT_TOOLS - {"browser-xss-auth"}),
                                  "arbitrary_shell_commands": False, "agent_selected_executable_paths": False},
             "plan_only": plan_only, "execution_started": False}
-    write_json_atomic(root / "agent-tool-plan.json", plan)
+    # Preserve the original plan on recovery, including if binding validation
+    # later rejects changed inputs. No report/result files are written yet.
+    if not resume:
+        write_json_atomic(root / "agent-tool-plan.json", plan)
     if plan_only:
         return {"status": "planned", "plan": plan, "runs": [], "findings": []}
-    execution = run_agent_tool_feedback(packets, known, root / "execution", scope=scope,
-        max_rounds=max_rounds, reviewer=analyze if model else None,
-        checkpoint_path=root / "execution" / "execution-state.json",
-        checkpoint_context={"mode": plan["mode"], "initial_requests": packets})
+    try:
+        execution = run_agent_tool_feedback(packets, known, root / "execution", scope=scope,
+            max_rounds=max_rounds, reviewer=analyze if model else None,
+            checkpoint_path=checkpoint, resume=resume,
+            checkpoint_context={"mode": plan["mode"], "initial_requests": packets})
+    except ValueError:
+        if not resume:
+            raise
+        raise AgentExecutionInputError(
+            "native recovery rejected; use identical inputs and rounds, inspect checkpoint/lock, "
+            "and never automatically replay an interrupted running round") from None
     counts = dict(Counter(run.get("status", "unknown") for run in execution["runs"]))
     result = {"status": "finished" if execution["runs"] else "not_run",
+              "execution_resumed": resume,
               "execution_outcome": summarize_execution_outcome(execution),
               "planner_mode": plan["mode"], "model_inference_enabled": model is not None,
               "execution": execution, "run_status_counts": counts, "model_reviews": reviews,
