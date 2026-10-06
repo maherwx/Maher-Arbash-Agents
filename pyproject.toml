@@ -8,6 +8,7 @@ dependencies = ["PyYAML>=6.0"]
 [project.optional-dependencies]
 local-inference = ["llama-cpp-python>=0.3.14"]
 browser = ["playwright>=1.48,<2"]
+graphql = ["graphql-core>=3.2.6,<3.3"]
 
 [project.scripts]
 maher-bounty = "maher_bounty.cli:main"

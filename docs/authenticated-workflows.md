@@ -1,5 +1,8 @@
 # Authenticated access policies and workflow invariants
 
+HTTP access cases support supplied [GraphQL field authorization queries](graphql-field-authorization.md)
+with aliases/fragments and repeated positive protected-field proof across identities.
+
 [Native policy agents](executable-policy-agents.md) can select and execute these
 declared tests, analyze outcomes and review proof completeness without a model API.
 

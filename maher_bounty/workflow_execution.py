@@ -29,6 +29,7 @@ from .scope_policy import is_in_scope_url
 from .artifact_io import write_json_atomic
 from .response_policy import validate_response_policy, response_policy_assertions
 from .state_integrity import validate_state_cases, execute_state_cases
+from .graphql_policy import validate_graphql_case, graphql_envelope_valid
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -285,6 +286,17 @@ def _assertions(response, expected):
     return checks
 
 
+def _access_assertions(response, case):
+    checks = _assertions(response, {"statuses": [200], **case["proof"]})
+    if case.get("graphql"):
+        try:
+            valid = graphql_envelope_valid(_decode_json(response["body"]))
+        except (ValueError, TypeError, RecursionError):
+            valid = False
+        checks.append({"kind": "graphql_envelope", "passed": valid, "evidence_complete": valid})
+    return checks
+
+
 def _observation(response, checks):
     body = response["body"].encode("utf-8")
     return {"status": response["status"], "body_sha256": hashlib.sha256(body).hexdigest(),
@@ -418,7 +430,11 @@ def validate_manifest(manifest, scope):
         if not case.get("proof", {}).get("contains") and not case.get("proof", {}).get("json_equals"):
             raise ValueError("access cases require a resource-specific content proof")
         request = case.get("request", {})
-        if request.get("method", "GET").upper() not in {"GET", "HEAD"}:
+        if not isinstance(case.get("graphql", False), bool):
+            raise ValueError("access case graphql flag must be boolean")
+        if case.get("graphql"):
+            validate_graphql_case(case, manifest.get("engine", "http"))
+        elif request.get("method", "GET").upper() not in {"GET", "HEAD"}:
             raise ValueError("access matrix uses read-only requests; use workflows for mutations")
         if request.get("browser", {}).get("actions"):
             raise ValueError("access matrices cannot repeat form actions; use workflows")
@@ -718,13 +734,15 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
 
     for case in manifest.get("access_cases", []):
         rows, control = [], None
+        protocol_evidence = (validate_graphql_case(case, manifest.get("engine", "http"))
+                             if case.get("graphql") else {})
         phase = "allowed_control"
         try:
             # Repeat the allowed baseline to reject unstable or invalid controls.
             for name in case["allowed"]:
                 for repeat in range(2):
                     response = send(name, case["request"])
-                    checks = _assertions(response, {"statuses": [200], **case["proof"]})
+                    checks = _access_assertions(response, case)
                     valid = bool(checks) and all(c["passed"] for c in checks) and not response.get("truncated") and not response.get("network_incomplete")
                     rows.append({"identity": name, "role": "allowed", "repeat": repeat,
                                  **_observation(response, checks)})
@@ -758,7 +776,7 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                 hits = []
                 for repeat in range(2):
                     response = send(name, case["request"])
-                    checks = _assertions(response, {"statuses": [200], **case["proof"]})
+                    checks = _access_assertions(response, case)
                     hit = all(c["passed"] for c in checks)
                     hits.append(hit)
                     rows.append({"identity": name, "role": "denied", "repeat": repeat,
@@ -773,14 +791,14 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                     findings.append({"source": "workflow_execution", "title": f"Access policy violated: {case['id']} ({name})",
                                      "target": _safe_url(case["request"]["url"]), "severity": "high", "validated": True,
                                      "evidence": {"case_id": case["id"], "identity": name, "observations": rows.copy(),
-                                                  "proof_specificity": specificity},
+                                                  "proof_specificity": specificity, **protocol_evidence},
                                      "basis": "explicit policy, valid allowed controls, repeatable forbidden resource proof"})
             decisions.append({"id": case["id"], "status": "completed", "proof_specificity": specificity})
         except (OSError, URLError, RuntimeError, ValueError, RecursionError, HTTPException) as exc:
             # Do not persist exception text, which can contain credential values.
             decisions.append({"id": case["id"], "status": "inconclusive", "phase": phase,
                               "error_type": type(exc).__name__})
-        observations.append({"id": case["id"], "observations": rows})
+        observations.append({"id": case["id"], "observations": rows, **protocol_evidence})
 
     state_evidence = execute_state_cases(manifest.get("state_cases", []), send)
     findings.extend(state_evidence["findings"])
