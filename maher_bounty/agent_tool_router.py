@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import hashlib
 import shutil
 import secrets
 from collections import deque
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from .active_testing import _dalfox_findings, _directory_discovery, _exec, _nuclei_findings
 from .scope_policy import filter_in_scope_urls
@@ -20,15 +21,15 @@ SUPPORTED_AGENT_TOOLS = {
     "browser-xss", "browser-xss-auth",
     "hakrawler", "katana", "httpx", "nuclei", "dalfox", "zap-baseline.py", "sslscan",
     "nikto", "nmap", "tlsx", "whatweb", "wafw00f", "dnsx", "naabu", "ffuf", "gobuster",
-    "subfinder", "assetfinder", "waybackurls", "gau", "alterx",
+    "subfinder", "assetfinder", "waybackurls", "gau", "alterx", "arjun",
 }
 DIRECT_AGENT_TOOLS = SUPPORTED_AGENT_TOOLS - {"browser-xss-auth"}
 AGENT_TOOL_PROFILES = {
     "all": DIRECT_AGENT_TOOLS,
-    "web": {"browser-xss", "hakrawler", "katana", "httpx", "nuclei", "dalfox",
+    "web": {"browser-xss", "hakrawler", "katana", "httpx", "nuclei", "dalfox", "arjun",
             "zap-baseline.py", "nikto", "whatweb", "wafw00f", "ffuf", "gobuster"},
     "discovery": {"hakrawler", "katana", "httpx", "ffuf", "gobuster", "subfinder",
-                  "assetfinder", "waybackurls", "gau", "alterx", "dnsx"},
+                  "assetfinder", "waybackurls", "gau", "alterx", "dnsx", "arjun"},
     "network": {"nmap", "naabu", "dnsx", "tlsx", "sslscan"},
 }
 MAX_AGENT_REQUESTS = 20
@@ -36,6 +37,9 @@ MAX_AGENT_TARGETS = 30
 MAX_HAKRAWLER_ORIGINS = 2
 MAX_ZAP_ORIGINS = 2
 MAX_FOLLOWUP_ORIGINS = 2
+MAX_ARJUN_TARGETS = 2
+MAX_ARJUN_PARAMETERS_PER_URL = 30
+MAX_ARJUN_JSON_BYTES = 2 * 1024 * 1024
 
 ORIGIN_TOOLS = {"hakrawler", "katana", "nikto", "zap-baseline.py", "whatweb", "wafw00f", "tlsx", "ffuf", "gobuster", "httpx", "sslscan"}
 HOST_TOOLS = {"nmap", "naabu", "dnsx", "subfinder", "assetfinder", "waybackurls", "gau", "alterx"}
@@ -132,6 +136,95 @@ def _http_probe_inventory(path, scope, known):
     telemetry["new_in_scope_url_count"] = len(urls)
     telemetry["probe_inventory_status"] = ("partial" if telemetry["probe_inventory_truncated"]
                                             or telemetry["invalid_probe_row_count"] else "parsed")
+    return urls, telemetry
+
+
+def _arjun_parameter_urls(path, source_url: str, scope: dict, known: set[str]) -> tuple[list[str], dict]:
+    """Extract bounded GET parameter names and bind them to the exact probed route."""
+    telemetry = {
+        "parameter_discovery_status": "unavailable",
+        "parameter_artifact_complete": False,
+        "parameter_endpoint_count": 0,
+        "discovered_parameter_count": 0,
+        "new_parameterized_url_count": 0,
+        "invalid_parameter_row_count": 0,
+        "out_of_scope_parameter_url_count": 0,
+    }
+    try:
+        with Path(path).open("rb") as stream:
+            raw = stream.read(MAX_ARJUN_JSON_BYTES + 1)
+    except OSError:
+        telemetry["parameter_discovery_status"] = "result_file_missing"
+        return [], telemetry
+    if len(raw) > MAX_ARJUN_JSON_BYTES:
+        telemetry["parameter_discovery_status"] = "result_file_too_large"
+        return [], telemetry
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError, RecursionError):
+        telemetry["parameter_discovery_status"] = "invalid_json"
+        return [], telemetry
+    if not isinstance(payload, dict):
+        telemetry["parameter_discovery_status"] = "invalid_result_shape"
+        return [], telemetry
+
+    source = urlsplit(source_url)
+    source_path = source.path or "/"
+    existing_pairs = parse_qsl(source.query, keep_blank_values=True)
+    existing_names = {name.casefold() for name, _ in existing_pairs}
+    found_names = []
+    seen_names = set(existing_names)
+    for endpoint, details in list(payload.items())[:100]:
+        if not isinstance(endpoint, str) or not isinstance(details, dict):
+            telemetry["invalid_parameter_row_count"] += 1
+            continue
+        candidate = urlsplit(endpoint)
+        if (_origin(endpoint) != _origin(source_url) or (candidate.path or "/") != source_path
+                or str(details.get("method", "")).upper() != "GET"):
+            telemetry["invalid_parameter_row_count"] += 1
+            continue
+        telemetry["parameter_endpoint_count"] += 1
+        params = details.get("params")
+        if not isinstance(params, list):
+            telemetry["invalid_parameter_row_count"] += 1
+            continue
+        for name in params[:MAX_ARJUN_PARAMETERS_PER_URL]:
+            if (not isinstance(name, str) or not name or len(name) > 128
+                    or any(ord(char) < 32 or ord(char) == 127 for char in name)):
+                telemetry["invalid_parameter_row_count"] += 1
+                continue
+            key = name.casefold()
+            if key in seen_names:
+                continue
+            seen_names.add(key)
+            found_names.append(name)
+            if len(found_names) >= MAX_ARJUN_PARAMETERS_PER_URL:
+                break
+        if len(found_names) >= MAX_ARJUN_PARAMETERS_PER_URL:
+            break
+
+    telemetry["discovered_parameter_count"] = len(found_names)
+    if not found_names:
+        telemetry["parameter_discovery_status"] = (
+            "parsed_no_new_parameters" if telemetry["invalid_parameter_row_count"] == 0
+            else "parsed_with_invalid_rows"
+        )
+        telemetry["parameter_artifact_complete"] = telemetry["invalid_parameter_row_count"] == 0
+        return [], telemetry
+
+    query = urlencode([*existing_pairs, *((name, "") for name in found_names)])
+    parameter_url = urlunsplit((source.scheme, source.netloc, source_path, query, ""))
+    try:
+        scoped, rejected = filter_in_scope_urls([parameter_url], scope)
+    except ValueError:
+        scoped, rejected = [], [parameter_url]
+    telemetry["out_of_scope_parameter_url_count"] = len(rejected)
+    urls = [url for url in scoped if url not in known]
+    telemetry["new_parameterized_url_count"] = len(urls)
+    telemetry["parameter_artifact_complete"] = telemetry["invalid_parameter_row_count"] == 0
+    telemetry["parameter_discovery_status"] = (
+        "parsed_with_parameters" if telemetry["parameter_artifact_complete"] else "partial"
+    )
     return urls, telemetry
 
 
@@ -250,6 +343,7 @@ def build_local_tool_requests(
         "browser-xss": [url for url in allowed if urlparse(url).query],
         "nuclei": allowed,
         "dalfox": [url for url in allowed if urlparse(url).query],
+        "arjun": [url for url in allowed if not urlparse(url).query],
         "katana": origin_urls,
         "hakrawler": allowed,
         "zap-baseline.py": origin_urls,
@@ -278,6 +372,14 @@ def build_local_tool_requests(
         dir_tool = "ffuf" if shutil.which("ffuf") else "gobuster"
     else:
         dir_tool = "ffuf" if "ffuf" in available_tools else "gobuster" if "gobuster" in available_tools else None
+    arjun_chain_enabled = ("arjun" in enabled_tools and
+                           (available_tools is None or "arjun" in available_tools))
+    if arjun_chain_enabled:
+        candidates_by_tool["dalfox"] = allowed
+        candidates_by_tool["browser-xss"] = allowed
+        if browser_xss_profile is not None and "browser-xss-auth" in enabled_tools:
+            auth_origin = _origin(browser_xss_profile["identity"]["origin"])
+            candidates_by_tool["browser-xss-auth"] = [url for url in allowed if _origin(url) == auth_origin]
     if dir_tool in enabled_tools:
         candidates_by_tool[dir_tool] = [
             url for url in origin_urls
@@ -287,7 +389,7 @@ def build_local_tool_requests(
     requests = []
     selected_targets = set()
     for tool in (
-        "browser-xss-auth", "nuclei", "dalfox", "browser-xss", "katana", "hakrawler", "zap-baseline.py",
+        "arjun", "browser-xss-auth", "nuclei", "dalfox", "browser-xss", "katana", "hakrawler", "zap-baseline.py",
         "naabu", "dnsx", "alterx", "tlsx", "sslscan", "ffuf", "gobuster",
         "whatweb", "wafw00f", "nikto", "nmap", "httpx",
         "subfinder", "assetfinder", "waybackurls", "gau",
@@ -302,7 +404,8 @@ def build_local_tool_requests(
             key = _coverage_key(tool, url)
             if not key or key in covered[tool] or key in seen_keys:
                 continue
-            if tool == "dalfox" and not urlparse(url).query:
+            if (tool in {"dalfox", "browser-xss", "browser-xss-auth"} and not urlparse(url).query
+                    and not (arjun_chain_enabled and tool in {"dalfox", "browser-xss", "browser-xss-auth"})):
                 continue
             if tool == "tlsx" and urlparse(url).scheme.lower() != "https":
                 continue
@@ -364,6 +467,24 @@ def run_agent_tool_requests(
     seen = {name: set() for name in selected}
     target_budget = MAX_AGENT_TARGETS
     deferred_seen = {name: set() for name in selected}
+    arjun_requested_sources = set()
+    for request in requests:
+        if str(request.get("tool", "")).strip().lower() != "arjun":
+            continue
+        raw_targets = request.get("targets", [])
+        if isinstance(raw_targets, str):
+            raw_targets = [raw_targets]
+        if not isinstance(raw_targets, list):
+            raw_targets = []
+        candidates = [value for value in raw_targets if isinstance(value, str)]
+        raw_refs = request.get("target_refs", [])
+        if isinstance(raw_refs, str):
+            raw_refs = [raw_refs]
+        if not isinstance(raw_refs, list):
+            raw_refs = []
+        candidates.extend((target_references or {}).get(ref) for ref in raw_refs if isinstance(ref, str))
+        scoped_sources, _ = filter_in_scope_urls([url for url in candidates if isinstance(url, str)], scope)
+        arjun_requested_sources.update(url for url in scoped_sources if url in known)
 
     for row in requests:
         tool = str(row.get("tool", "")).strip().lower()
@@ -397,12 +518,15 @@ def run_agent_tool_requests(
         eligible = []
         postponed = []
         unsupported_scheme_count = 0
-        capacity = MAX_AGENT_TARGETS if tool in {"httpx", "nuclei", "dalfox"} else MAX_FOLLOWUP_ORIGINS
+        capacity = (MAX_AGENT_TARGETS if tool in {"httpx", "nuclei", "dalfox"}
+                    else MAX_ARJUN_TARGETS if tool == "arjun"
+                    else MAX_FOLLOWUP_ORIGINS)
         for url in in_scope:
             if url not in known:
                 continue
             parsed = urlparse(url)
-            if tool in {"dalfox", "browser-xss", "browser-xss-auth"} and not parsed.query:
+            if (tool in {"dalfox", "browser-xss", "browser-xss-auth"} and not parsed.query
+                    and url not in arjun_requested_sources):
                 continue
             if tool == "browser-xss-auth" and _origin(url) != _origin(browser_xss_profile["identity"]["origin"]):
                 continue
@@ -453,6 +577,44 @@ def run_agent_tool_requests(
 
     runs, findings = [], []
     new_crawl_urls = []
+    parameter_urls_by_source = {}
+    for index, scan_url in enumerate(selected["arjun"][:MAX_ARJUN_TARGETS], start=1):
+        if not shutil.which("arjun"):
+            runs.append({"tool": "arjun", "status": "missing", "target": scan_url,
+                         "reason": "agent-requested GET parameter discovery; binary not installed"})
+            continue
+        output = root / f"arjun-get-parameters-{index}.json"
+        run = _exec([
+            "arjun", "-u", scan_url, "-m", "GET", "-w", "small", "-c", "25",
+            "-t", "1", "-T", "10", "-d", "0.5", "--rate-limit", "2",
+            "--stable", "--disable-redirects", "-q", "-o", str(output),
+        ], timeout=240)
+        run["target"] = scan_url
+        discovered, telemetry = _arjun_parameter_urls(output, scan_url, scope, known)
+        if run.get("status") != "ok":
+            telemetry["parameter_discovery_status"] = "process_" + str(run.get("status", "unknown"))
+            telemetry["parameter_artifact_complete"] = False
+        run.update(telemetry)
+        runs.append(run)
+        parameter_urls_by_source[scan_url] = discovered
+        new_crawl_urls.extend(discovered)
+
+    # Only run validators the planner explicitly selected for a route Arjun
+    # actually checked. Newly discovered parameter names stay in exact scope.
+    for validator in ("dalfox", "browser-xss", "browser-xss-auth"):
+        source_seeds = [url for url in selected[validator]
+                        if url in parameter_urls_by_source and not urlparse(url).query]
+        seeded = [url for url in selected[validator] if url not in source_seeds]
+        for source in source_seeds:
+            for candidate in parameter_urls_by_source.get(source, []):
+                if validator == "browser-xss-auth" and (
+                    browser_xss_profile is None
+                    or _origin(candidate) != _origin(browser_xss_profile["identity"]["origin"])
+                ):
+                    continue
+                seeded.append(candidate)
+        selected[validator] = list(dict.fromkeys(seeded))
+
     for index, scan_url in enumerate(selected["browser-xss-auth"][:MAX_FOLLOWUP_ORIGINS], start=1):
         check = run_browser_xss(scan_url, root / f"browser-xss-auth-{index}", scope=scope,
                                 authorized=True, profile=browser_xss_profile)
