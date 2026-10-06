@@ -1,5 +1,8 @@
 # Authenticated access policies and workflow invariants
 
+[Native policy agents](executable-policy-agents.md) can select and execute these
+declared tests, analyze outcomes and review proof completeness without a model API.
+
 HTTP manifests can declare [rejected-operation state-integrity cases](rejected-action-state-integrity.md)
 to check stable owner-observed state before and after an explicitly supplied actor action.
 

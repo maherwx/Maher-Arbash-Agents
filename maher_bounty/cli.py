@@ -12,6 +12,7 @@ from .workflow_execution import execute_workflows
 from .continuous_service import ContinuousAnalysisService, ServiceConfig, write_status
 from .source_review import review_source
 from .api_contract import review_api_contract, ContractInputError
+from .policy_agents import run_policy_agents
 
 
 def doctor():
@@ -86,6 +87,12 @@ def _main():
     wf.add_argument("--authorized", action="store_true")
     wf.add_argument("--out", default="results/workflows")
 
+    policy = s.add_parser("policy-agents-run", help="Execute declared policy tests using native planning, execution and evidence-review agents")
+    policy.add_argument("manifest", help="JSON identities and authorized access/state/workflow cases")
+    policy.add_argument("--scope", required=True)
+    policy.add_argument("--authorized", action="store_true")
+    policy.add_argument("--out", default="results/policy-agents")
+
     inv = s.add_parser("inventory", help="Normalize and deduplicate collected recon data")
     inv.add_argument("result_dir")
 
@@ -125,6 +132,14 @@ def _main():
     bench.add_argument("--engine", choices=["http", "browser"], default="http")
     bench.add_argument("--out", default="results/workflow-benchmark")
     a = p.parse_args()
+    if a.cmd == "policy-agents-run":
+        result = run_policy_agents(json.loads(Path(a.manifest).read_text(encoding="utf-8")),
+                                   json.loads(Path(a.scope).read_text(encoding="utf-8")), a.out,
+                                   authorized=a.authorized)
+        execution = result["execution"]
+        print(json.dumps({"status": execution["status"], "requests": execution["requests"],
+                          "selected_cases": result["selected_case_count"], "out": a.out}, indent=2))
+        return
     if a.cmd == "api-contract-review":
         result = review_api_contract(a.path, a.out)
         print(json.dumps({"status": result["status"], "operations": result["operation_count"],

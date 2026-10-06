@@ -25,6 +25,7 @@ from .workflow_execution import execute_workflows, validate_manifest
 from .browser_xss import load_browser_xss_profile
 from .source_review import review_source
 from .api_contract import review_api_contract
+from .policy_agents import run_policy_agents
 from .source_correlation import correlate_source_traffic
 from .artifact_io import write_json_atomic
 from .source_check_plan import build_source_check_plan, audit_source_checks
@@ -128,6 +129,11 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
     if workflow_manifest_path:
         workflow_manifest = json.loads(Path(workflow_manifest_path).read_text(encoding="utf-8"))
         validate_manifest(workflow_manifest, scope)
+        if type(workflow_manifest.get("agent_policy_execution", False)) is not bool:
+            raise ValueError("agent_policy_execution must be a boolean")
+        if workflow_manifest.get("agent_policy_execution", False) and sum(
+                len(workflow_manifest.get(category, [])) for category in ("access_cases", "state_cases", "workflows")) > 100:
+            raise ValueError("policy agents accept at most one hundred declared cases")
         browser_xss_profile = load_browser_xss_profile(workflow_manifest, scope)
     api_contract_review = review_api_contract(api_contract_path) if api_contract_path else {"mode": "not_run"}
     imported_traffic = ingest_traffic(traffic_path, kind="auto") if traffic_path else None
@@ -188,12 +194,18 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             print("[active] SKIPPED: rules.yaml has allow_active_discovery=false; reports contain hypotheses only.", flush=True)
 
         workflow_execution = {"status": "requires_input", "reason": "no workflow manifest supplied", "findings": []}
+        policy_agent_execution = {"mode": "not_run"}
         if workflow_manifest_path:
             print("[workflows] Executing identity access matrix and application invariants", flush=True)
-            workflow_execution = execute_workflows(
-                workflow_manifest, scope,
-                out / "workflows", authorized=authorized,
-            )
+            if workflow_manifest.get("agent_policy_execution", False):
+                policy_agent_execution = run_policy_agents(workflow_manifest, scope, out / "policy-agents", authorized=authorized)
+                workflow_execution = policy_agent_execution["execution"]
+                store.checkpoint(run_id, "policy_agent_execution", policy_agent_execution)
+            else:
+                workflow_execution = execute_workflows(
+                    workflow_manifest, scope,
+                    out / "workflows", authorized=authorized,
+                )
             active_testing["findings"] = _dedupe([*active_testing.get("findings", []), *workflow_execution["findings"]])
             active_testing["unique_findings"] = len(active_testing["findings"])
             store.checkpoint(run_id, "workflow_execution", workflow_execution)
@@ -406,6 +418,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "inventory_source": source_file, "tool_plan": inventory.get("tool_plan", {}),
             "active_testing": active_testing, "burp_traffic_evidence": traffic_evidence,
             "workflow_execution": workflow_execution,
+            "policy_agent_execution": policy_agent_execution,
             "source_review": source_review,
             "api_contract_review": api_contract_review,
             "source_check_plan": {key: value for key, value in source_tool_plan.items() if key != "agent_results"},
