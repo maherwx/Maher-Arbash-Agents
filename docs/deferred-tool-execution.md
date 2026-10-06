@@ -31,3 +31,22 @@ Compatibility with older routers without `attempted_targets` retains their previ
 attempt accounting. New router metadata is used in the normal bundled pipeline.
 No tests, experiments, scans or model/tool executions were performed for this
 change. Source and diff review only; runtime verification remains outstanding.
+
+The coordinator now checks the unattempted native plan before stopping for lack
+of newly discovered URLs. It can continue a complementary check on an existing
+known URL when an earlier plan/request budget left an eligible adapter uncovered.
+The native next plan is filtered against admitted attempts, including failed or
+output-limited attempts; it does not automatically retry those tools. The same
+scope, coverage keys, process templates and three-round budget still apply.
+
+Model reviewers receive `unattempted_native_plan` with actual execution feedback
+so they can see which complementary requests the fixed planner already proposes.
+Each round records `next_native_request_count`; the aggregate exposes
+`remaining_native_request_count` and `pending_request_proposals`. At the round
+limit, the direct command's JSON/Markdown finding report retains these unfinished
+proposals. They may contain duplicate/ineligible model requests and are not
+admitted execution or confirmed missing security coverage. Deferred and native
+counts are request batches, not distinct targets; do not add them as a unique
+coverage count. No extra round, target expansion or unrestricted shell is added.
+An interrupted running checkpoint still cannot be automatically replayed.
+This extension was reviewed statically only; no runtime tests or tools ran.

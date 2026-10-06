@@ -95,7 +95,7 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
     ]
     # Failed, blocked, missing, and timed-out runs count as attempts too.
     # A later run can retry after the recorded cause is fixed.
-    attempted_statuses = {"ok", "nonzero", "timeout", "blocked", "missing", "partial"}
+    attempted_statuses = {"ok", "nonzero", "timeout", "output_limit", "blocked", "missing", "partial"}
     for run in run_rows:
         if not isinstance(run, dict) or run.get("status") not in attempted_statuses:
             continue

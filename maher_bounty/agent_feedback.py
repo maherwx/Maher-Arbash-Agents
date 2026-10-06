@@ -6,6 +6,22 @@ from .scope_policy import filter_in_scope_urls
 from .execution_journal import ExecutionJournal
 
 
+def _fresh_native_packets(packets, attempted):
+    """Native plans use exact targets; exclude all admitted prior attempts."""
+    fresh = []
+    for packet in packets:
+        requests = []
+        for request in packet.get("tool_requests", []):
+            tool = request["tool"]
+            targets = [target for target in request["targets"]
+                       if (tool, _coverage_key(tool, target)) not in attempted]
+            if targets:
+                requests.append({**request, "targets": targets})
+        if requests:
+            fresh.append({**packet, "tool_requests": requests})
+    return fresh
+
+
 def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testing=None,
                             tool_plan=None, target_references=None, max_rounds=3, reviewer=None,
                             checkpoint_path=None, resume=False, checkpoint_context=None, browser_xss_profile=None):
@@ -85,6 +101,8 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
             return aggregate
 
     aggregate.setdefault("admitted_attempts", [])
+    aggregate.setdefault("remaining_native_request_count", 0)
+    aggregate.setdefault("pending_request_proposals", [])
     if not isinstance(aggregate["admitted_attempts"], list):
         raise ValueError("execution journal admission evidence is invalid")
 
@@ -142,6 +160,8 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
         if not submitted:
             stop = "no_unattempted_requests"
             aggregate["remaining_deferred_request_count"] = 0
+            aggregate["remaining_native_request_count"] = 0
+            aggregate["pending_request_proposals"] = []
             break
         save("running_round", index)
         summary = run_agent_tool_requests(submitted, known, Path(out_dir) / f"round-{index + 1}",
@@ -179,11 +199,17 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
                                     "run_count": len(summary.get("runs", [])),
                                     "finding_count": len(summary.get("findings", []))})
         reviews = []
+        native_next = _fresh_native_packets(build_local_tool_requests(
+            known, scope=scope, active_testing=context, tool_plan=tool_plan,
+            browser_xss_profile=browser_xss_profile)["agent_results"], attempted)
+        native_count = sum(len(packet["tool_requests"]) for packet in native_next)
+        aggregate["remaining_native_request_count"] = native_count
+        aggregate["rounds"][-1]["next_native_request_count"] = native_count
         if reviewer is not None:
             packet = {"round": index + 1, "can_schedule_next_round": index + 1 < max_rounds,
                       "known_urls": list(known), "new_in_scope_urls": list(fresh),
                       "runs": list(aggregate["runs"]), "findings": list(aggregate["findings"]),
-                      "decisions": list(aggregate["decisions"])}
+                      "decisions": list(aggregate["decisions"]), "unattempted_native_plan": native_next}
             try:
                 response = reviewer(packet)
                 if not isinstance(response, list):
@@ -197,11 +223,16 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
                                                    "error_type": type(exc).__name__})
         has_requests = any(bool(row.get("tool_requests")) for row in reviews
                            if isinstance(row.get("tool_requests"), list))
-        if not fresh and not has_requests and not deferred:
+        if not fresh and not has_requests and not deferred and not native_next:
             stop = "no_new_in_scope_evidence"
+            aggregate["pending_request_proposals"] = []
             break
-        pending = [*deferred, *reviews, *build_local_tool_requests(known, scope=scope, active_testing=context,
-                                                       tool_plan=tool_plan, browser_xss_profile=browser_xss_profile)["agent_results"]]
+        pending = [*deferred, *reviews, *native_next]
+        # Proposals are not admissions or successful checks. Preserve them at
+        # the round limit instead of silently losing the unfinished work list.
+        aggregate["pending_request_proposals"] = [
+            {"agent": packet.get("agent"), "tool_requests": packet["tool_requests"]}
+            for packet in pending if isinstance(packet.get("tool_requests"), list) and packet["tool_requests"]]
         save("completed_round", index + 1)
     aggregate["stop_reason"] = stop
     aggregate["known_in_scope_url_count"] = len(initial | set(aggregate["new_in_scope_urls"]))

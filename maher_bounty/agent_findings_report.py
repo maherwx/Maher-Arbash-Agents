@@ -76,9 +76,11 @@ def write_agent_findings_report(result, scope, targets, out_dir):
                           "verification_counts": dict(Counter(item["verification"] for item in findings)),
                           "run_status_counts": result["run_status_counts"],
                           "remaining_deferred_request_count": execution.get("remaining_deferred_request_count", 0),
+                          "remaining_native_request_count": execution.get("remaining_native_request_count", 0),
                           "stop_reason": execution.get("stop_reason")},
               "findings": findings, "model_hypotheses": hypotheses,
               "runs": runs, "decisions": execution.get("decisions", []), "rounds": execution.get("rounds", []),
+              "pending_request_proposals": execution.get("pending_request_proposals", []),
               "limitations": ["all recorded findings preserved, including duplicates and missing metadata",
                               "tool-reported validation is not independent confirmation of exploitability or impact",
                               "model hypotheses never promoted into tool-confirmed findings",
@@ -104,7 +106,8 @@ def write_agent_findings_report(result, scope, targets, out_dir):
         lines.append("No model hypothesis was recorded.")
     lines.extend(["", "## Execution and coverage", "", _json_block({
         "initial_targets": targets, "scope": scope, "runs": runs, "decisions": report["decisions"],
-        "rounds": report["rounds"]}), "", "## Limitations", "", _json_block(report["limitations"])])
+        "rounds": report["rounds"], "pending_request_proposals": report["pending_request_proposals"]}),
+        "", "## Limitations", "", _json_block(report["limitations"])])
     root = Path(out_dir)
     _write_markdown(root / "findings-report.md", "\n".join(lines) + "\n")
     # Authoritative JSON written last; readers must compare generation hashes
