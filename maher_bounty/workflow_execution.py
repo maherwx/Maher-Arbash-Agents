@@ -27,6 +27,7 @@ from .differential import compare_responses
 from .burp_evidence import _safe_url
 from .scope_policy import is_in_scope_url
 from .artifact_io import write_json_atomic
+from .response_policy import validate_response_policy, response_policy_assertions
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -279,6 +280,7 @@ def _assertions(response, expected):
             # Neither baseline, actual nor computed delta is persisted.
             checks.append({"kind": "json_delta", "pointer": pointer,
                            "operator": comparison, "passed": passed})
+    checks.extend(response_policy_assertions(response, expected))
     return checks
 
 
@@ -292,10 +294,11 @@ def _observation(response, checks):
 
 
 def _validate_expectation(expected, *, allow_templates=False):
-    supported = {"statuses", "contains", "absent", "json_equals", "json_absent", "json_number", "json_delta"}
+    supported = {"statuses", "contains", "absent", "json_equals", "json_absent", "json_number", "json_delta",
+                 "response_headers", "response_cookies"}
     if not isinstance(expected, dict) or not expected or set(expected) - supported:
         raise ValueError("expectations require supported assertion keys")
-    count = 0
+    count = validate_response_policy(expected)
     for key in ("contains", "absent"):
         if key in expected:
             markers = expected[key]
@@ -581,7 +584,8 @@ class Transport:
         with response:
             raw = self._read_body(response, read_deadline)
             return {"status": response.code, "body": raw[:self.max_bytes].decode("utf-8", errors="replace"),
-                    "headers": dict(response.headers), "truncated": len(raw) > self.max_bytes}
+                    "headers": dict(response.headers), "header_items": list(response.headers.items()),
+                    "truncated": len(raw) > self.max_bytes}
 
     def _read_body(self, response, deadline):
         # HTTPError wraps HTTPResponse; locate its socket to narrow each read

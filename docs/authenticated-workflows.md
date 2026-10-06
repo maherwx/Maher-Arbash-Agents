@@ -1,5 +1,8 @@
 # Authenticated access policies and workflow invariants
 
+Expectations can verify [response headers and cookie attributes](response-security-policies.md)
+alongside body, status and captured-state assertions in both HTTP and browser modes.
+
 The same manifest can configure a supplied identity and session control for
 [authenticated browser execution checks](authenticated-browser-checks.md),
 integrated with the local agent tool coordinator.

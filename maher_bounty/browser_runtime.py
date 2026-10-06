@@ -226,8 +226,11 @@ class BrowserTransport:
             body = page.locator(settings.get("body_selector", "body")).inner_text()
             refresh_timeout()
             final = main_responses[-1] if main_responses else response
+            header_items = [(row["name"], row["value"]) for row in final.headers_array()] if final else []
             return {"status": final.status if final else 0, "body": body[:1048576],
-                    "headers": {}, "truncated": len(body) > 1048576, "captured": captures,
+                    "headers": dict(header_items), "header_items": header_items,
+                    "headers_incomplete": final is None,
+                    "truncated": len(body) > 1048576, "captured": captures,
                     "pending_requests": len(self.pending[name]),
                     "network_incomplete": self.blocked + self.failed > incomplete_before or bool(self.pending[name]),
                     "browser_derived": True}
