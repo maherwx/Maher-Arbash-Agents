@@ -1,6 +1,7 @@
 """Maher local desktop: forms mirror the authoritative CLI parser."""
 import argparse
 import codecs
+from datetime import datetime
 import os
 import queue
 import shlex
@@ -166,7 +167,7 @@ def launch_desktop(parser):
     style.configure("TNotebook", background="#0b1220")
     style.configure("TNotebook.Tab", padding=(18, 9))
     events = queue.Queue(maxsize=4)
-    state = {"running": False, "closing": False, "cancel": None, "job_output": None, "live_output": None}
+    state = {"running": False, "closing": False, "cancel": None, "job_output": None, "live_output": None, "next_output": None}
     fields = []
     form_values = {}
     selected_tool_vars = {}
@@ -454,6 +455,20 @@ def launch_desktop(parser):
                 if not local_model_enabled:
                     raise ValueError("\u0641\u0639\u0651\u0644 \u0646\u0645\u0648\u0630\u062c GGUF \u0627\u0644\u0645\u062d\u0644\u064a \u0642\u0628\u0644 \u0643\u062a\u0627\u0628\u0629 \u062a\u0648\u062c\u064a\u0647 \u0644\u0644\u0648\u0643\u0644\u0627\u0621")
                 argv.append("--operator-brief=" + brief)
+            if "--out" not in argv:
+                output_action = next(action for action in commands["agent-tools-run"]._actions
+                                     if action.dest == "out")
+                base = Path(output_action.default)
+                candidate = Path(state["next_output"]) if state["next_output"] else None
+                if candidate is None or candidate.exists():
+                    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                    candidate = base.with_name(f"{base.name}-{stamp}")
+                    suffix = 1
+                    while candidate.exists():
+                        candidate = base.with_name(f"{base.name}-{stamp}-{suffix}")
+                        suffix += 1
+                    state["next_output"] = str(candidate)
+                argv.extend(["--out", str(candidate)])
         # Validate types/choices using the same parser that dispatches the CLI.
         try:
             parser.parse_args(argv)
@@ -487,9 +502,13 @@ def launch_desktop(parser):
         output_value = next((variable.get() for action, flag, variable, required in fields
                              if action.dest == "out"), None)
         if selected.get() == "agent-tools-run" and output_value is None:
-            output_value = next((action.default for action in commands[selected.get()]._actions
-                                 if action.dest == "out"), None)
+            try:
+                output_value = argv[argv.index("--out") + 1]
+            except (ValueError, IndexError):
+                output_value = next((action.default for action in commands[selected.get()]._actions
+                                     if action.dest == "out"), None)
         state["job_output"] = output_value
+        state["next_output"] = None
         state.update(running=True, cancel=threading.Event())
         selector.configure(state="disabled")
         execute_button.configure(state="disabled")
