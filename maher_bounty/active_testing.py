@@ -5,6 +5,8 @@ import json
 import re
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -26,14 +28,61 @@ def _tail(value, limit: int = 3000) -> str:
     return str(value or "")[-limit:]
 
 
-def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_text: str | None = None) -> dict:
+def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_text: str | None = None,
+          progress: bool = False) -> dict:
     tool = cmd[0]
     effective_timeout = max(1, int(timeout)) + 180
     if not shutil.which(tool):
         return {"tool": tool, "status": "missing", "command": cmd, "findings": 0, "stderr_tail": ""}
     print(f"[ACTIVE] {tool:<12} RUN timeout={effective_timeout}s (+180s tool allowance)", flush=True)
+    started = time.monotonic()
+    stop_progress = threading.Event()
+    progress_buffer = ""
+
+    def show_progress():
+        while not stop_progress.wait(15):
+            elapsed = int(time.monotonic() - started)
+            print(f"[ACTIVE] {tool:<12} WORKING elapsed={elapsed}s", flush=True)
+
+    def on_output(stream: str, chunk: bytes):
+        nonlocal progress_buffer
+        if not progress or tool != "arjun" or stream != "stdout":
+            return
+        progress_buffer += chunk.decode("utf-8", errors="replace").replace("\r", "\n")
+        lines = progress_buffer.split("\n")
+        progress_buffer = lines.pop()[-4096:]
+        for raw_line in lines:
+            line = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", raw_line).lower()
+            if "probing the target for stability" in line:
+                state = "STAGE baseline check"
+            elif "analysing http response" in line or "analyzing http response" in line:
+                state = "STAGE response analysis"
+            elif "logicforcing the url endpoint" in line:
+                state = "STAGE endpoint parameter verification"
+            elif "parameters found:" in line:
+                state = "RESULT parameter names exported"
+            elif "parameter detected:" in line:
+                state = "PROGRESS parameter candidate confirmed"
+            elif "no parameters were discovered" in line:
+                state = "RESULT no parameter names reported; coverage remains limited"
+            else:
+                match = re.search(r"processing chunks:\s*(\d+)\s*/\s*(\d+)", line)
+                if not match:
+                    continue
+                state = f"PROGRESS parameter groups {match.group(1)}/{match.group(2)}"
+            print(f"[ACTIVE] {tool:<12} {state}", flush=True)
+
+    ticker = threading.Thread(target=show_progress, name=f"{tool}-progress", daemon=True)
+    ticker_started = False
     try:
-        cp = run_process(cmd, input=input_text, capture_output=True, text=True, timeout=effective_timeout, check=False)
+        ticker.start()
+        ticker_started = True
+    except RuntimeError:
+        pass
+    try:
+        cp = run_process(cmd, input=input_text, capture_output=True, text=True,
+                         timeout=effective_timeout, check=False,
+                         on_output=on_output if progress else None)
         combined = (cp.stdout or "") + ("\n" + cp.stderr if cp.stderr else "")
         if output:
             output.parent.mkdir(parents=True, exist_ok=True)
@@ -50,10 +99,8 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
             error_category = "nuclei_templates_missing"
         print(f"[ACTIVE] {tool:<12} {status.upper()}", flush=True)
         if status != "ok" and (stderr_tail or stdout_tail):
-            diagnostic = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "",
-                                f"stderr: {_tail(stderr_tail, 180)} | stdout: {_tail(stdout_tail, 180)}")
-            diagnostic = diagnostic.replace("\n", " ")
-            print(f"[ACTIVE] {tool:<12} ERROR: {diagnostic[-400:]}", flush=True)
+            diagnostic = (stderr_tail or stdout_tail).replace("\n", " ")[:400]
+            print(f"[ACTIVE] {tool:<12} ERROR: {diagnostic}", flush=True)
         return {
             "tool": tool, "status": status, "returncode": cp.returncode, "command": cmd, "timeout_seconds": effective_timeout,
             "output": str(output) if output else None, "stderr_tail": stderr_tail, "stdout_tail": stdout_tail,
@@ -75,6 +122,10 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
         return {"tool": tool, "status": "nonzero", "returncode": None, "command": cmd,
                 "timeout_seconds": effective_timeout, "error_category": "process_launch_failed",
                 "stderr_tail": _tail(str(exc)), "stdout_tail": ""}
+    finally:
+        stop_progress.set()
+        if ticker_started:
+            ticker.join(timeout=1)
 
 
 def _nuclei_findings(path: Path) -> list[dict]:
