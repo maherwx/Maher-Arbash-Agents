@@ -121,6 +121,12 @@ pipx install arjun
 
 This is the installation method documented by [the official Arjun project](https://github.com/s0md3v/Arjun). Installation is separate from assessment execution.
 
+During execution, the desktop log emits periodic `WORKING elapsed=...` status lines.
+Arjun's quiet flag is omitted so the adapter can report its phase and parameter-group
+progress without echoing full target URLs or discovered parameter values. Its
+coordinator timeout is capped at five minutes, including the existing 180-second
+process allowance; a timeout is recorded and the remaining bounded plan continues.
+
 When `arjun` is installed and selected, the local coordinator can run a bounded
 GET-only parameter-name discovery pass against up to two exact in-scope routes.
 It uses Arjun’s bundled `small` wordlist, one worker, a two-request-per-second
