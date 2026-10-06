@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import shutil
+import secrets
 from collections import deque
 from pathlib import Path
 from urllib.parse import urlparse
@@ -75,6 +76,54 @@ def _origin(url: str) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return ""
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _http_probe_inventory(path, scope, known):
+    """Admit only recorded HTTPX response URLs; no inferred hosts or paths."""
+    urls, seen = [], set(known)
+    telemetry = {"response_count": 0, "rejected_probe_url_count": 0,
+                 "invalid_probe_row_count": 0, "probe_inventory_truncated": False}
+    try:
+        with Path(path).open("rb") as stream:
+            raw = stream.read(8 * 1024 * 1024 + 1)
+    except OSError:
+        return [], {**telemetry, "probe_inventory_status": "unavailable"}
+    if len(raw) > 8 * 1024 * 1024:
+        raw = raw[:8 * 1024 * 1024]
+        telemetry["probe_inventory_truncated"] = True
+    for index, line in enumerate(raw.decode("utf-8", errors="replace").splitlines()):
+        if index >= 1000:
+            telemetry["probe_inventory_truncated"] = True
+            break
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except (ValueError, RecursionError):
+            telemetry["invalid_probe_row_count"] += 1
+            continue
+        if (not isinstance(row, dict) or type(row.get("status_code")) is not int
+                or not 100 <= row["status_code"] <= 599 or row.get("failed")):
+            telemetry["invalid_probe_row_count"] += 1
+            continue
+        url = row.get("url")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            telemetry["invalid_probe_row_count"] += 1
+            continue
+        telemetry["response_count"] += 1
+        try:
+            allowed, rejected = filter_in_scope_urls([url], scope)
+        except ValueError:
+            allowed, rejected = [], [url]
+        telemetry["rejected_probe_url_count"] += len(rejected)
+        for value in allowed:
+            if value not in seen:
+                seen.add(value)
+                urls.append(value)
+    telemetry["new_in_scope_url_count"] = len(urls)
+    telemetry["probe_inventory_status"] = ("partial" if telemetry["probe_inventory_truncated"]
+                                            or telemetry["invalid_probe_row_count"] else "parsed")
+    return urls, telemetry
 
 
 def _read_target_file(command: list[str], flag: str) -> set[str]:
@@ -406,7 +455,14 @@ def run_agent_tool_requests(
                 continue
             target_file = root / "httpx-followup-targets.txt"
             target_file.write_text("\n".join(targets) + "\n", encoding="utf-8")
-            result = _exec([tool, "-l", str(target_file), "-json", "-silent", "-rate-limit", "3"], timeout=180)
+            # A unique output path prevents failed launches/empty timeouts from
+            # reusing a previous invocation's probe artifact as fresh evidence.
+            output_file = root / f"httpx-followup-responses-{secrets.token_hex(8)}.jsonl"
+            result = _exec([tool, "-l", str(target_file), "-json", "-silent", "-rate-limit", "3"],
+                           timeout=180, output=output_file)
+            probe_urls, probe_telemetry = _http_probe_inventory(output_file, scope, known)
+            result.update(probe_telemetry)
+            new_crawl_urls.extend(probe_urls)
             result["target_count"] = len(targets)
             runs.append(result)
             continue

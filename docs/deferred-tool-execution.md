@@ -50,3 +50,23 @@ counts are request batches, not distinct targets; do not add them as a unique
 coverage count. No extra round, target expansion or unrestricted shell is added.
 An interrupted running checkpoint still cannot be automatically replayed.
 This extension was reviewed statically only; no runtime tests or tools ran.
+
+HTTPX follow-up output is now preserved in `httpx-followup-responses-<run-id>.jsonl` and
+parsed into the scoped feedback inventory. Previously that branch captured only
+an output tail and never admitted its returned URLs. Only explicit `url` values
+with recorded HTTP status integers and no failed flag are admitted, after scope
+validation and deduplication; hosts/paths are not inferred. This can retain a
+recorded alternate HTTP/HTTPS URL for complementary checks within scope. No
+redirect-following flags or target policy changes are added. Inventory admission
+is not proof of vulnerability or authentication.
+
+The parser reads at most 8 MiB and 1,000 lines. Invalid/non-response rows and
+out-of-scope URLs are counted. Missing artifacts, incomplete extraction and
+truncation remain explicit in run telemetry (`probe_inventory_status`, response,
+rejected/invalid row counts). Tool process status is retained separately; parsing
+partial output does not turn a timeout/nonzero exit into success. Existing global
+discovery budgets and router scope checks still apply. Output may contain sensitive
+probe metadata. Unique invocation paths prevent a failed launch or empty timeout
+from parsing an older probe artifact as fresh output. Output may contain sensitive
+metadata and must remain private. Source/diff review only; no HTTPX process,
+test, application or assessment was executed for this change.
