@@ -1,5 +1,6 @@
 """Maher local desktop: forms mirror the authoritative CLI parser."""
 import argparse
+import codecs
 import os
 import queue
 import shlex
@@ -165,7 +166,7 @@ def launch_desktop(parser):
     style.configure("TNotebook", background="#0b1220")
     style.configure("TNotebook.Tab", padding=(18, 9))
     events = queue.Queue(maxsize=4)
-    state = {"running": False, "closing": False, "cancel": None, "job_output": None}
+    state = {"running": False, "closing": False, "cancel": None, "job_output": None, "live_output": None}
     fields = []
     form_values = {}
     selected_tool_vars = {}
@@ -253,6 +254,51 @@ def launch_desktop(parser):
         panel.delete("1.0", "end")
         panel.insert("1.0", content)
         panel.configure(state="disabled")
+
+    def flush_live_output():
+        live = state.get("live_output")
+        if live is None:
+            return
+        with live["lock"]:
+            chunks = live["chunks"]
+            live["chunks"] = []
+            live["pending_chars"] = 0
+            truncated = live["truncated"] and not live["truncation_noted"]
+            if truncated:
+                live["truncation_noted"] = True
+        if not chunks and not truncated:
+            return
+        output.configure(state="normal")
+        for stream_name, content in chunks:
+            if stream_name not in live["seen"]:
+                output.insert("end", f"\n[{stream_name}]\n")
+                live["visible_chars"] += len(stream_name) + 4
+                live["seen"].add(stream_name)
+            output.insert("end", content)
+            live["visible_chars"] += len(content)
+        if truncated:
+            note = "\n[Live preview reached its size limit; final captured output appears when the job ends.]\n"
+            output.insert("end", note)
+            live["visible_chars"] += len(note)
+        excess = max(0, live["visible_chars"] - 200000)
+        if excess:
+            output.delete("1.0", f"1.0 + {excess} chars")
+            live["visible_chars"] -= excess
+        output.see("end")
+        output.configure(state="disabled")
+
+    def stream_output(live, stream_name, chunk):
+        content = live["decoders"][stream_name].decode(chunk)
+        if not content:
+            return
+        with live["lock"]:
+            remaining = 200000 - live["pending_chars"]
+            if remaining > 0:
+                visible = content[:remaining]
+                live["chunks"].append((stream_name, visible))
+                live["pending_chars"] += len(visible)
+            if len(content) > remaining:
+                live["truncated"] = True
 
     def browse(variable, kind="file"):
         if kind == "directory":
@@ -449,14 +495,24 @@ def launch_desktop(parser):
         execute_button.configure(state="disabled")
         status.set("Running \u2022 \u0642\u064a\u062f \u0627\u0644\u062a\u0646\u0641\u064a\u0630")
         progress.start(12)
-        replace_text(output, display_command(argv) + "\n\nRunning. Captured logs appear when this job ends.\n")
+        initial_output = display_command(argv) + "\n\nRunning. Live tool output will appear below.\n"
+        replace_text(output, initial_output)
+        live_state = {
+            "lock": threading.Lock(), "chunks": [], "pending_chars": 0,
+            "truncated": False, "truncation_noted": False, "seen": set(),
+            "visible_chars": len(initial_output),
+            "decoders": {name: codecs.getincrementaldecoder("utf-8")(errors="replace")
+                         for name in ("stdout", "stderr")},
+        }
+        state["live_output"] = live_state
         notebook.select(output_tab)
         cancel_event = state["cancel"]
 
         def worker():
             try:
                 completed = run(argv, capture_output=True, text=True, timeout=None,
-                                env=environment, cancel_event=cancel_event, truncate_output=True)
+                                env=environment, cancel_event=cancel_event, truncate_output=True,
+                                on_output=lambda stream_name, chunk: stream_output(live_state, stream_name, chunk))
                 label = "Finished" if completed.returncode == 0 else f"Failed (exit {completed.returncode})"
                 if completed.output_truncated:
                     label += " (log capture truncated)"
@@ -540,6 +596,7 @@ def launch_desktop(parser):
     progress.pack(fill="x", pady=(10, 0))
 
     def poll():
+        flush_live_output()
         try:
             label, content = events.get_nowait()
         except queue.Empty:
@@ -552,6 +609,7 @@ def launch_desktop(parser):
             execute_button.configure(state="normal")
             # Bound the desktop preview independently of preserved tool artifacts.
             replace_text(output, ("[Output preview truncated]\n" if len(content) > 200000 else "") + content[-200000:])
+            state["live_output"] = None
             refresh_reports()
             if state["closing"]:
                 window.destroy()
