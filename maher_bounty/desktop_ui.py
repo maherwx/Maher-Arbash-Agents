@@ -33,7 +33,7 @@ OPERATION_LABELS = {
 OPERATION_DESCRIPTIONS = {
     "run": "\u064a\u0634\u063a\u0651\u0644 \u0627\u0644\u0648\u0643\u0644\u0627\u0621 \u0648\u064a\u0646\u0641\u0630 \u0627\u0644\u0641\u062d\u0635 \u062d\u0633\u0628 \u0645\u0644\u0641\u064a \u0627\u0644\u0646\u0637\u0627\u0642 \u0648\u0627\u0644\u0642\u0648\u0627\u0639\u062f.",
     "auto-run": "\u064a\u062c\u0645\u0639 \u0627\u0644\u0623\u0635\u0648\u0644 \u0627\u0644\u0645\u062a\u0627\u062d\u0629 \u062b\u0645 \u064a\u0634\u063a\u0651\u0644 \u0627\u0644\u0641\u062d\u0635. \u064a\u0631\u0633\u0644 \u0637\u0644\u0628\u0627\u062a \u0644\u0644\u0647\u062f\u0641 \u0627\u0644\u0645\u0635\u0631\u0651\u062d \u0628\u0647.",
-    "agent-tools-run": "\u064a\u0634\u063a\u0651\u0644 \u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0623\u062f\u0648\u0627\u062a \u0645\u062d\u0644\u064a\u0629 \u0645\u062d\u062f\u062f\u0629 \u0644\u0644\u0646\u0637\u0627\u0642. \u0627\u0644\u0648\u0643\u0644\u0627\u0621 \u0644\u0627 \u064a\u0643\u062a\u0628\u0648\u0646 \u0623\u0648\u0627\u0645\u0631 \u0634\u064a\u0644 \u0645\u0646 \u062a\u0644\u0642\u0627\u0621 \u0623\u0646\u0641\u0633\u0647\u0645.",
+    "agent-tools-run": "\u064a\u0634\u063a\u0651\u0644 \u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0645\u062d\u0644\u064a\u0629 \u0645\u062d\u062f\u062f\u0629 \u0644\u0644\u0646\u0637\u0627\u0642. \u0627\u062e\u062a\u0631 \u0645\u062c\u0645\u0648\u0639\u0629 \u0627\u0644\u0648\u064a\u0628 \u0623\u0648 \u0627\u0643\u062a\u0634\u0627\u0641 \u0627\u0644\u0645\u0633\u0627\u0631\u0627\u062a \u0623\u0648 \u0627\u0644\u0634\u0628\u0643\u0629/TLS \u0623\u0648 \u062c\u0645\u064a\u0639 \u0627\u0644\u0623\u062f\u0648\u0627\u062a. \u064a\u0634\u063a\u0651\u0644 \u0627\u0644\u0645\u0646\u0633\u0651\u0642 \u0627\u0644\u0645\u062d\u0644\u064a \u0627\u0644\u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0627\u0644\u0645\u062b\u0628\u062a\u0629 \u0636\u0645\u0646 \u0627\u0644\u0646\u0637\u0627\u0642; \u0644\u0627 \u064a\u0648\u0644\u0651\u062f \u0623\u0648\u0627\u0645\u0631 \u0634\u064a\u0644 \u062d\u0631\u0629.",
     "workflow-run": "\u064a\u0646\u0641\u0630 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0648\u0641\u062d\u0648\u0635 \u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0645\u0643\u062a\u0648\u0628\u0629 \u0641\u064a \u0627\u0644\u0645\u0644\u0641.",
     "policy-agents-run": "\u064a\u062e\u062a\u0628\u0631 \u0635\u0644\u0627\u062d\u064a\u0627\u062a \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a \u0627\u0644\u0645\u0632\u0648\u0651\u062f\u0629 \u0648\u0627\u0644\u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0645\u0635\u0631\u0651\u062d\u0629.",
     "api-contract-review": "\u064a\u0631\u0627\u062c\u0639 \u0645\u0644\u0641 OpenAPI \u0645\u062d\u0644\u064a\u064b\u0627 \u062f\u0648\u0646 \u0625\u0631\u0633\u0627\u0644 \u0637\u0644\u0628\u0627\u062a \u0644\u0644\u0645\u0648\u0642\u0639.",
@@ -54,6 +54,7 @@ FIELD_LABELS = {
     "manifest": "\u0645\u0644\u0641 \u062d\u0627\u0644\u0627\u062a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631", "source_dir": "\u0645\u062c\u0644\u062f \u0627\u0644\u0643\u0648\u062f \u0627\u0644\u0645\u062d\u0644\u064a",
     "api_contract": "\u0645\u0644\u0641 OpenAPI \u0645\u062d\u0644\u064a", "out": "\u0645\u0643\u0627\u0646 \u062d\u0641\u0638 \u0627\u0644\u0646\u062a\u0627\u0626\u062c",
     "rounds": "\u0623\u0642\u0635\u0649 \u0639\u062f\u062f \u0644\u0644\u062c\u0648\u0644\u0627\u062a", "requests": "\u0645\u0644\u0641 \u0637\u0644\u0628\u0627\u062a \u0623\u062f\u0648\u0627\u062a \u0627\u062e\u062a\u064a\u0627\u0631\u064a",
+    "tool_profile": "\u0645\u062c\u0645\u0648\u0639\u0629 \u0623\u062f\u0648\u0627\u062a \u0627\u0644\u062a\u0646\u0641\u064a\u0630",
     "local_model": "\u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u062d\u0644\u064a \u0645\u064f\u0639\u062f", "plan_only": "\u0625\u0639\u062f\u0627\u062f \u062e\u0637\u0629 \u062f\u0648\u0646 \u062a\u0634\u063a\u064a\u0644 \u0623\u062f\u0648\u0627\u062a",
     "resume": "\u0627\u0633\u062a\u0626\u0646\u0627\u0641 \u062a\u0646\u0641\u064a\u0630 \u0645\u062d\u0641\u0648\u0638 \u0645\u0637\u0627\u0628\u0642",
 }
@@ -68,6 +69,13 @@ FIELD_HELP = {
     "local_model": "\u064a\u0633\u062a\u062e\u062f\u0645 \u0641\u0642\u0637 \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u0648\u062c\u0648\u062f \u0639\u0644\u0649 \u062c\u0647\u0627\u0632\u0643.",
     "plan_only": "\u064a\u0646\u0634\u0626 \u062e\u0637\u0629 \u0648\u0644\u0627 \u064a\u0637\u0644\u0642 \u0623\u062f\u0648\u0627\u062a \u0639\u0644\u0649 \u0627\u0644\u0647\u062f\u0641.",
     "resume": "\u064a\u062a\u0637\u0644\u0628 \u0646\u0641\u0633 \u0627\u0644\u0646\u0637\u0627\u0642 \u0648\u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u0648\u0639\u062f\u062f \u0627\u0644\u062c\u0648\u0644\u0627\u062a \u0627\u0644\u0633\u0627\u0628\u0642.",
+    "tool_profile": "\u064a\u062d\u062f\u062f \u0623\u064a \u0645\u062c\u0645\u0648\u0639\u0629 \u0623\u062f\u0648\u0627\u062a \u064a\u0633\u0645\u062d \u0644\u0644\u0648\u0643\u0644\u0627\u0621 \u0628\u0627\u062e\u062a\u064a\u0627\u0631\u0647\u0627 \u062e\u0644\u0627\u0644 \u062c\u0645\u064a\u0639 \u0627\u0644\u062c\u0648\u0644\u0627\u062a.",
+}
+CHOICE_LABELS = {
+    "tool_profile": {"all": "\u0643\u0644 \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u062f\u0639\u0648\u0645\u0629",
+                     "web": "\u0641\u062d\u0635 \u062a\u0637\u0628\u064a\u0642\u0627\u062a \u0627\u0644\u0648\u064a\u0628",
+                     "discovery": "\u0627\u0643\u062a\u0634\u0627\u0641 \u0627\u0644\u0645\u0633\u0627\u0631\u0627\u062a \u0648\u0627\u0644\u0623\u0635\u0648\u0644",
+                     "network": "\u0641\u062d\u0635 \u0627\u0644\u0634\u0628\u0643\u0629 \u0648 TLS"},
 }
 
 
@@ -256,9 +264,12 @@ def launch_desktop(parser):
                 ttk.Checkbutton(line, variable=variable, text=FIELD_LABELS.get(action.dest, action.help or action.dest)).pack(side="left")
             else:
                 default = "" if action.default is None else str(action.default)
-                variable = tk.StringVar(value=saved.get(action.dest, default))
+                labels = CHOICE_LABELS.get(action.dest, {})
+                saved_value = saved.get(action.dest, default)
+                variable = tk.StringVar(value=labels.get(saved_value, saved_value))
                 if action.choices:
-                    ttk.Combobox(line, textvariable=variable, values=[str(item) for item in action.choices],
+                    ttk.Combobox(line, textvariable=variable,
+                                 values=[labels.get(str(item), str(item)) for item in action.choices],
                                  state="readonly", width=32).pack(side="left", fill="x", expand=True)
                 else:
                     ttk.Entry(line, textvariable=variable).pack(side="left", fill="x", expand=True)
@@ -278,6 +289,33 @@ def launch_desktop(parser):
                 if help_text:
                     ttk.Label(form, text=help_text, wraplength=700).pack(anchor="w", padx=29)
             fields.append((action, flag, variable, required))
+        if name == "agent-tools-run":
+            from .tool_readiness import tool_readiness_snapshot
+
+            readiness_text = tk.StringVar()
+            readiness_box = ttk.LabelFrame(form, text="\u062a\u0648\u0641\u0631 \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u062d\u0644\u064a\u0629", padding=8)
+            readiness_box.pack(fill="x", pady=(14, 4))
+            ttk.Label(readiness_box, textvariable=readiness_text, justify="left",
+                      wraplength=730).pack(anchor="w", fill="x")
+
+            def refresh_readiness():
+                snapshot = tool_readiness_snapshot()
+                lines = [f"\u0645\u062a\u0627\u062d {snapshot['available_count']} \u0645\u0646 {snapshot['total_count']} \u0645\u062d\u0648\u0651\u0644\u064b\u0627. \u0647\u0630\u0627 \u064a\u0641\u062d\u0635 PATH \u0648\u0627\u0644\u062a\u0628\u0639\u064a\u0627\u062a \u0641\u0642\u0637; \u0644\u0627 \u064a\u0634\u063a\u0651\u0644 \u0623\u062f\u0648\u0627\u062a."]
+                for row in snapshot["tools"]:
+                    if row["status"] == "available":
+                        state_label = "\u0645\u062a\u0627\u062d"
+                    elif row["status"] == "dependency_present_browser_unverified":
+                        state_label = "Playwright \u0645\u062a\u0627\u062d\u061b \u0627\u0644\u0645\u062a\u0635\u0641\u062d \u063a\u064a\u0631 \u0645\u062a\u062d\u0642\u0642"
+                    elif row["status"] == "workflow_only":
+                        state_label = "\u0639\u0628\u0631 \u0645\u0644\u0641 \u0633\u064a\u0631 \u0639\u0645\u0644"
+                    else:
+                        state_label = "\u063a\u064a\u0631 \u0645\u062b\u0628\u062a"
+                    lines.append(f"{row['tool']} \u2014 {state_label}")
+                readiness_text.set("\n".join(lines))
+
+            ttk.Button(readiness_box, text="\u062a\u062d\u062f\u064a\u062b \u062d\u0627\u0644\u0629 \u0627\u0644\u0623\u062f\u0648\u0627\u062a",
+                       command=refresh_readiness).pack(anchor="e", pady=(6, 0))
+            refresh_readiness()
         canvas.yview_moveto(0)
 
     def on_select(event):
@@ -296,6 +334,7 @@ def launch_desktop(parser):
                 continue
             if required and not value:
                 raise ValueError(f"Required option: {flag or action.dest}")
+            value = {label: key for key, label in CHOICE_LABELS.get(action.dest, {}).items()}.get(value, value)
             if value:
                 argv.extend([flag, value] if flag else [value])
         # Validate types/choices using the same parser that dispatches the CLI.

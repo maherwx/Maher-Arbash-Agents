@@ -30,6 +30,17 @@ example, the agents now include a fixed `sslscan` adapter for in-scope HTTPS
 origins. Its host/port arguments are chosen by the adapter and HTTP targets are
 filtered. Agents still cannot supply arbitrary shell commands or flags.
 
+Direct agent execution offers four tool profiles: all supported adapters, web
+application checks, route/asset discovery, or network and TLS checks. The
+selected profile limits requests in every round, including local-model
+proposals, and is recorded with the plan and results. The form also shows a
+local readiness snapshot for each adapter. It checks executable names on
+`PATH` and the optional Playwright Python dependency only; it does not launch a
+scanner or confirm a browser installation. A selected eligible adapter that
+is missing is recorded as a missing run, rather than a successful check.
+Authenticated browser checks remain part of supplied workflow profiles rather
+than direct tool execution.
+
 Required inputs, original defaults, boolean authorization flags, choices and
 numeric parser validation are preserved. You still supply scope, identities,
 traffic exports, source paths, request packets and assessment manifests. The

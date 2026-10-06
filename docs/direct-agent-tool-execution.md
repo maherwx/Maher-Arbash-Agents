@@ -55,6 +55,16 @@ At most 120 initial URLs/packets, 20 requests per worker and 1 MiB per input JSO
 file; duplicate fields/nonfinite constants are rejected. Existing per-round
 request/target/origin and tool process timeout/output limits still apply.
 
+Use `--tool-profile all|web|discovery|network` to bound which fixed adapters
+agents may request across every round. `all` preserves the complete supported
+adapter set. Web includes browser/query and web scanner adapters; discovery
+includes crawlers, route and asset sources; network includes host/port and TLS
+adapters. The selected profile and a local prerequisite snapshot are recorded
+in `agent-tool-plan.json` and `agent-tool-results.json`. The snapshot only
+checks `PATH` and Playwright package metadata; it does not run tools or verify
+that a browser can launch. A profile does not bypass scope admission, per-tool
+budgets or exact-known-target checks.
+
 Supported adapters include httpx, katana, nuclei, dalfox, ZAP baseline, nmap,
 sslscan, ffuf and the other router tools. sslscan is limited to HTTPS origins
 already in scope and receives a fixed host/port argument; HTTP URLs are filtered.

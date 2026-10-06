@@ -24,10 +24,11 @@ def _fresh_native_packets(packets, attempted):
 
 def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testing=None,
                             tool_plan=None, target_references=None, max_rounds=3, reviewer=None,
-                            checkpoint_path=None, resume=False, checkpoint_context=None, browser_xss_profile=None):
+                            checkpoint_path=None, resume=False, checkpoint_context=None, browser_xss_profile=None,
+                            allowed_tools=None):
     options = dict(scope=scope, active_testing=active_testing, tool_plan=tool_plan,
                    target_references=target_references, max_rounds=max_rounds, reviewer=reviewer,
-                   browser_xss_profile=browser_xss_profile)
+                   browser_xss_profile=browser_xss_profile, allowed_tools=allowed_tools)
     if checkpoint_path is None:
         if resume:
             raise ValueError("execution resume requires a checkpoint path")
@@ -48,7 +49,8 @@ def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testi
 
 def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testing=None,
                              tool_plan=None, target_references=None, max_rounds=3,
-                             reviewer=None, journal=None, restored=None, browser_xss_profile=None):
+                             reviewer=None, journal=None, restored=None, browser_xss_profile=None,
+                             allowed_tools=None):
     if type(max_rounds) is not int or not 1 <= max_rounds <= 3:
         raise ValueError("agent feedback requires one to three rounds")
     if reviewer is not None and not callable(reviewer):
@@ -129,6 +131,10 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
                 tool = tool.strip().lower()
                 if tool in {"zap", "zaproxy", "zap.sh"}:
                     tool = "zap-baseline.py"
+                if allowed_tools is not None and tool not in allowed_tools:
+                    aggregate["decisions"].append({"agent": row.get("agent"), "tool": tool,
+                        "status": "rejected", "reason": "tool_excluded_by_selected_profile"})
+                    continue
                 targets = [targets] if isinstance(targets, str) else list(targets) if isinstance(targets, list) else []
                 refs = request.get("target_refs", [])
                 refs = [refs] if isinstance(refs, str) else refs if isinstance(refs, list) else []
@@ -201,7 +207,7 @@ def _run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_test
         reviews = []
         native_next = _fresh_native_packets(build_local_tool_requests(
             known, scope=scope, active_testing=context, tool_plan=tool_plan,
-            browser_xss_profile=browser_xss_profile)["agent_results"], attempted)
+            browser_xss_profile=browser_xss_profile, enabled_tools=allowed_tools)["agent_results"], attempted)
         native_count = sum(len(packet["tool_requests"]) for packet in native_next)
         aggregate["remaining_native_request_count"] = native_count
         aggregate["rounds"][-1]["next_native_request_count"] = native_count

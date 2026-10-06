@@ -22,6 +22,15 @@ SUPPORTED_AGENT_TOOLS = {
     "nikto", "nmap", "tlsx", "whatweb", "wafw00f", "dnsx", "naabu", "ffuf", "gobuster",
     "subfinder", "assetfinder", "waybackurls", "gau", "alterx",
 }
+DIRECT_AGENT_TOOLS = SUPPORTED_AGENT_TOOLS - {"browser-xss-auth"}
+AGENT_TOOL_PROFILES = {
+    "all": DIRECT_AGENT_TOOLS,
+    "web": {"browser-xss", "hakrawler", "katana", "httpx", "nuclei", "dalfox",
+            "zap-baseline.py", "nikto", "whatweb", "wafw00f", "ffuf", "gobuster"},
+    "discovery": {"hakrawler", "katana", "httpx", "ffuf", "gobuster", "subfinder",
+                  "assetfinder", "waybackurls", "gau", "alterx", "dnsx"},
+    "network": {"nmap", "naabu", "dnsx", "tlsx", "sslscan"},
+}
 MAX_AGENT_REQUESTS = 20
 MAX_AGENT_TARGETS = 30
 MAX_HAKRAWLER_ORIGINS = 2
@@ -214,6 +223,7 @@ def build_local_tool_requests(
     active_testing: dict | None = None,
     tool_plan: dict | None = None,
     browser_xss_profile: dict | None = None,
+    enabled_tools: set[str] | None = None,
 ) -> dict:
     """Build a no-model local follow-up plan from evidence and actual coverage.
 
@@ -257,12 +267,14 @@ def build_local_tool_requests(
         "waybackurls": origin_urls,
         "gau": origin_urls,
     }
+    enabled_tools = DIRECT_AGENT_TOOLS if enabled_tools is None else set(enabled_tools) & DIRECT_AGENT_TOOLS
     # Choose one content-discovery engine to avoid duplicate wordlist traffic.
     dir_tool = "ffuf" if shutil.which("ffuf") else "gobuster"
-    candidates_by_tool[dir_tool] = [
-        url for url in origin_urls
-        if urlparse(url).path in {"", "/"} and not urlparse(url).query
-    ]
+    if dir_tool in enabled_tools:
+        candidates_by_tool[dir_tool] = [
+            url for url in origin_urls
+            if urlparse(url).path in {"", "/"} and not urlparse(url).query
+        ]
 
     requests = []
     selected_targets = set()
@@ -272,6 +284,8 @@ def build_local_tool_requests(
         "whatweb", "wafw00f", "nikto", "nmap", "httpx",
         "subfinder", "assetfinder", "waybackurls", "gau",
     ):
+        if tool not in enabled_tools:
+            continue
         if tool not in candidates_by_tool or len(requests) >= MAX_AGENT_REQUESTS:
             continue
         eligible = []

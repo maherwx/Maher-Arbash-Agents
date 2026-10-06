@@ -5,13 +5,15 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .agent_feedback import run_agent_tool_feedback
-from .agent_tool_router import build_local_tool_requests, SUPPORTED_AGENT_TOOLS
+from .agent_tool_router import (build_local_tool_requests, SUPPORTED_AGENT_TOOLS,
+                                DIRECT_AGENT_TOOLS, AGENT_TOOL_PROFILES)
 from .artifact_io import write_json_atomic
 from .model_adapter import LocalModelAdapter
 from .scope_policy import filter_in_scope_urls
 from .agent_findings_report import write_agent_findings_report, summarize_execution_outcome
 from .agent_evidence_review import review_agent_evidence
 from .json_numbers import finite_json_float
+from .tool_readiness import tool_readiness_snapshot
 
 
 class AgentExecutionInputError(ValueError):
@@ -69,7 +71,8 @@ def _validate_packets(packets, known):
 
 
 def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=None,
-                       local_model=False, plan_only=False, max_rounds=3, resume=False):
+                       local_model=False, plan_only=False, max_rounds=3, resume=False,
+                       tool_profile="all"):
     if not authorized:
         raise AgentExecutionInputError("agent tool execution requires explicit authorization")
     if type(resume) is not bool or (resume and (local_model or plan_only)):
@@ -91,6 +94,8 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         raise AgentExecutionInputError("invalid target URL") from None
     if type(max_rounds) is not int or not 1 <= max_rounds <= 3:
         raise AgentExecutionInputError("rounds must be between one and three")
+    if tool_profile not in AGENT_TOOL_PROFILES:
+        raise AgentExecutionInputError("unknown local tool profile")
     known, rejected = filter_in_scope_urls(targets, scope)
     if rejected or not known:
         raise AgentExecutionInputError("all initial targets must be explicitly in scope")
@@ -128,7 +133,8 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         reviews.append({"round": packet["round"], "agents": outputs})
         return outputs
 
-    native = build_local_tool_requests(known, scope=scope)
+    allowed_tools = set(AGENT_TOOL_PROFILES[tool_profile])
+    native = build_local_tool_requests(known, scope=scope, enabled_tools=allowed_tools)
     packets = list(requests) if requests is not None else list(native["agent_results"])
     if model is not None:
         packets = [*analyze({"round": 0, "known_urls": known, "runs": [], "findings": [],
@@ -136,8 +142,11 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
     plan = {"mode": "local_gguf_plus_native" if model else "native_fixed_planner",
             "model_inference_enabled": model is not None, "initial_targets": known,
             "initial_requests": packets, "max_rounds": max_rounds,
-            "execution_policy": {"supported_tools": sorted(SUPPORTED_AGENT_TOOLS - {"browser-xss-auth"}),
+            "execution_policy": {"supported_tools": sorted(DIRECT_AGENT_TOOLS),
+                                 "selected_profile": tool_profile,
+                                 "selected_tools": sorted(allowed_tools),
                                  "arbitrary_shell_commands": False, "agent_selected_executable_paths": False},
+            "tool_readiness": tool_readiness_snapshot(),
             "plan_only": plan_only, "execution_started": False}
     # Preserve the original plan on recovery, including if binding validation
     # later rejects changed inputs. No report/result files are written yet.
@@ -149,7 +158,9 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         execution = run_agent_tool_feedback(packets, known, root / "execution", scope=scope,
             max_rounds=max_rounds, reviewer=analyze if model else None,
             checkpoint_path=checkpoint, resume=resume,
-            checkpoint_context={"mode": plan["mode"], "initial_requests": packets})
+            checkpoint_context={"mode": plan["mode"], "initial_requests": packets,
+                                "tool_profile": tool_profile, "selected_tools": sorted(allowed_tools)},
+            allowed_tools=allowed_tools)
     except ValueError:
         if not resume:
             raise
@@ -161,6 +172,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
               "execution_resumed": resume,
               "execution_outcome": summarize_execution_outcome(execution),
               "planner_mode": plan["mode"], "model_inference_enabled": model is not None,
+              "tool_profile": tool_profile, "tool_readiness": plan["tool_readiness"],
               "execution": execution, "run_status_counts": counts, "model_reviews": reviews,
               "evidence_review": review_agent_evidence(execution["findings"], execution["runs"],
                                   [*known, *execution.get("new_in_scope_urls", [])], scope),
