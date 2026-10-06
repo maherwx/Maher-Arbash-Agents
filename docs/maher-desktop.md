@@ -36,7 +36,7 @@ the tabs. The guided form does not ask for a scope, proxy export, workflow
 manifest, request packet, tool selection, model file, or output path. The URL's
 host becomes the scope. Maher selects all installed adapters permitted by the
 default `all` profile and skips unavailable adapters; each adapter keeps its
-existing limits. Every GUI run now gets a fresh timestamped folder under `results/agent-tools`, preserving older results and avoiding collisions with saved execution state.
+existing limits. Every GUI or direct CLI run gets a fresh timestamped folder under `results/agent-tools`, preserving older results and avoiding collisions with saved execution state.
 
 This URL flow performs anonymous checks. Authenticated checks need a separately
 supplied identity/workflow configuration; Maher does not infer login steps or
