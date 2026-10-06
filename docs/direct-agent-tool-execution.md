@@ -137,3 +137,23 @@ candidate needing browser proof. This classification also affects the existing
 full pipeline because it shares the extractor. There is no new target request,
 exploit execution or scanner launch in the review layer. Source/diff review only;
 runtime behavior has not been tested.
+
+## Execution outcomes
+
+Results now include `execution_outcome`, also recomputed from the run ledger in
+the JSON/Markdown report summary. The existing `status: finished` means the
+coordinator returned, even if every recorded tool failed; it is not a success
+certificate. The new state distinguishes no runs, all recorded runs failed,
+all recorded runs OK, and mixed/partial recorded runs. Counts expose failed,
+partial and unknown run statuses, and incomplete HTTP probe inventory extraction.
+Unknown statuses are not counted as successful or automatically called failures.
+
+Remaining native/deferred request counts, pending proposal count and stop reason
+are shown alongside the outcome. These counts are not unique targets and must
+not be added as an exhaustive coverage count. All recorded runs OK can coexist
+with unfinished proposals; it means only that those recorded processes reported
+OK and their recorded probe extraction was not incomplete. It does not establish
+vulnerability absence, account authorization, exploit validity or application
+impact. Existing CLI exit behavior and execution budgets remain unchanged.
+This update received source/diff review only and is unverified at runtime;
+no tests, tool execution, models, applications or assessments ran.

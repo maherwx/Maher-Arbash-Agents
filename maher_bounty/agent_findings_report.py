@@ -11,6 +11,34 @@ from pathlib import Path
 from .artifact_io import write_json_atomic
 
 
+def summarize_execution_outcome(execution):
+    """Describe recorded execution, never security coverage or exploit validity."""
+    runs = execution.get("runs", [])
+    failures = {"missing", "blocked", "nonzero", "timeout", "output_limit", "error", "failed"}
+    statuses = Counter(run.get("status", "unknown") if isinstance(run, dict) else "unknown" for run in runs)
+    failed = sum(statuses[status] for status in failures)
+    partial = statuses["partial"]
+    unknown = len(runs) - statuses["ok"] - failed - partial
+    incomplete_inventory = sum(isinstance(run, dict) and run.get("probe_inventory_status") not in {None, "parsed"}
+                               for run in runs)
+    if not runs:
+        state = "no_runs"
+    elif failed == len(runs):
+        state = "all_recorded_runs_failed"
+    elif statuses["ok"] == len(runs) and not incomplete_inventory:
+        state = "all_recorded_runs_ok"
+    else:
+        state = "mixed_or_partial_recorded_runs"
+    return {"state": state, "run_count": len(runs), "ok_run_count": statuses["ok"],
+            "failed_run_count": failed, "partial_run_count": partial, "unknown_run_count": unknown,
+            "incomplete_probe_inventory_run_count": incomplete_inventory,
+            "remaining_deferred_request_count": execution.get("remaining_deferred_request_count", 0),
+            "remaining_native_request_count": execution.get("remaining_native_request_count", 0),
+            "pending_proposal_count": len(execution.get("pending_request_proposals", [])),
+            "stop_reason": execution.get("stop_reason"),
+            "interpretation": "recorded process outcomes only; ok does not prove complete security coverage or valid findings"}
+
+
 def _entry(value, index, origin, *, hypothesis=False):
     serialized = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
     finding = value if isinstance(value, dict) else {}
@@ -88,6 +116,7 @@ def write_agent_findings_report(result, scope, targets, out_dir):
               "scope": scope, "initial_targets": targets,
               "planner_mode": result["planner_mode"], "model_inference_enabled": result["model_inference_enabled"],
               "summary": {"tool_finding_records": len(findings), "model_hypothesis_records": len(hypotheses),
+                          "execution_outcome": summarize_execution_outcome(execution),
                           "unique_exact_tool_records": len(hashes),
                           "verification_counts": dict(Counter(item["verification"] for item in findings)),
                           "evidence_review_counts": dict(Counter(

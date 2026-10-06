@@ -9,7 +9,7 @@ from .agent_tool_router import build_local_tool_requests, SUPPORTED_AGENT_TOOLS
 from .artifact_io import write_json_atomic
 from .model_adapter import LocalModelAdapter
 from .scope_policy import filter_in_scope_urls
-from .agent_findings_report import write_agent_findings_report
+from .agent_findings_report import write_agent_findings_report, summarize_execution_outcome
 from .agent_evidence_review import review_agent_evidence
 
 
@@ -141,6 +141,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         checkpoint_context={"mode": plan["mode"], "initial_requests": packets})
     counts = dict(Counter(run.get("status", "unknown") for run in execution["runs"]))
     result = {"status": "finished" if execution["runs"] else "not_run",
+              "execution_outcome": summarize_execution_outcome(execution),
               "planner_mode": plan["mode"], "model_inference_enabled": model is not None,
               "execution": execution, "run_status_counts": counts, "model_reviews": reviews,
               "evidence_review": review_agent_evidence(execution["findings"], execution["runs"],
