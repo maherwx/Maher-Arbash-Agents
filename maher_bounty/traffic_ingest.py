@@ -13,6 +13,40 @@ class TrafficInputError(ValueError):
     """An explicit traffic input cannot be read or parsed."""
 
 
+MAX_TRAFFIC_BYTES = 64 * 1024 * 1024
+MAX_TRAFFIC_RECORDS = 10000
+
+
+def _read_export(path: str | Path) -> bytes:
+    with Path(path).open("rb") as stream:
+        data = stream.read(MAX_TRAFFIC_BYTES + 1)
+    if len(data) > MAX_TRAFFIC_BYTES:
+        raise TrafficInputError("Traffic export exceeds 64 MiB; split it into smaller exports")
+    return data
+
+
+def _unique_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("HAR contains duplicate JSON fields")
+        result[key] = value
+    return result
+
+
+def _invalid_constant(value):
+    raise ValueError("HAR contains non-finite JSON values")
+
+
+def _validate_har_message(message):
+    if not isinstance(message, dict):
+        raise ValueError("HAR request and response must be objects")
+    for field in ("headers", "cookies"):
+        rows = message.get(field, [])
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError("HAR headers and cookies must be lists of objects")
+
+
 def _decode(value: str | None, encoded: bool = False) -> str:
     if not value:
         return ""
@@ -101,12 +135,21 @@ def _burp_identity(raw: str) -> str | None:
             headers[name.strip().lower()] = item.strip()
     return _identity_from_headers(headers)
 def load_har(path: str | Path) -> list[dict]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(_read_export(path).decode("utf-8-sig"),
+                      object_pairs_hook=_unique_fields, parse_constant=_invalid_constant)
     if not isinstance(data, dict) or not isinstance(data.get("log"), dict) or not isinstance(data["log"].get("entries"), list):
         raise ValueError("HAR requires log.entries")
+    if len(data["log"]["entries"]) > MAX_TRAFFIC_RECORDS:
+        raise TrafficInputError("Traffic export exceeds 10000 records; split it into smaller exports")
     out = []
     for sequence,entry in enumerate(data.get("log", {}).get("entries", [])):
+        if not isinstance(entry, dict):
+            raise ValueError("HAR entries must be objects")
         req, resp = entry.get("request", {}), entry.get("response", {})
+        _validate_har_message(req)
+        _validate_har_message(resp)
+        if not isinstance(req.get("url", ""), str) or not isinstance(req.get("method", "GET"), str):
+            raise ValueError("HAR URL and method must be strings")
         out.append(_record(
             req.get("url", ""), req.get("method", "GET"), resp.get("status"),
             json.dumps(req, ensure_ascii=False), json.dumps(resp, ensure_ascii=False), "har",
@@ -116,11 +159,19 @@ def load_har(path: str | Path) -> list[dict]:
 
 
 def load_burp_xml(path: str | Path) -> list[dict]:
-    root = ET.parse(path).getroot()
+    data = _read_export(path)
+    # Burp exports can legitimately include element/attribute DTD schemas.
+    # Reject entity declarations, including ASCII markers in UTF-16/32,
+    # before ElementTree can expand them. No external resource is fetched.
+    if re.search(br"<!\s*ENTITY\b", data.replace(b"\x00", b""), re.I):
+        raise TrafficInputError("Burp XML entity declarations are unsupported")
+    root = ET.fromstring(data)
     if root.tag != "items":
         raise ValueError("Burp XML requires items root")
     out = []
-    for sequence,item in enumerate(root.findall(".//item")):
+    for sequence,item in enumerate(root.iterfind(".//item")):
+        if sequence >= MAX_TRAFFIC_RECORDS:
+            raise TrafficInputError("Traffic export exceeds 10000 records; split it into smaller exports")
         url = item.findtext("url") or ""; method = item.findtext("method") or "GET"; status_text = item.findtext("status") or ""
         req = item.find("request"); resp = item.find("response")
         request = _decode(req.text if req is not None else "", req is not None and req.attrib.get("base64") == "true")
@@ -146,7 +197,9 @@ def ingest_traffic(path: str | Path, kind: str = "auto") -> list[dict]:
             return load_burp_xml(path)
         if kind in {"har", "zap"} or path.suffix.lower() == ".har":
             return load_zap_har(path) if kind == "zap" else load_har(path)
-    except (OSError, ValueError, ET.ParseError, AttributeError, TypeError, KeyError) as error:
+    except TrafficInputError:
+        raise
+    except (OSError, ValueError, ET.ParseError, AttributeError, TypeError, KeyError, RecursionError) as error:
         # Parser diagnostics can contain credentials or captured response text.
         raise TrafficInputError(f"Cannot read traffic file as Burp XML/HAR: {path} ({type(error).__name__}). Check the export format and file permissions.") from None
     raise TrafficInputError(f"Unsupported traffic format: {path}. Use Burp XML or HAR.")

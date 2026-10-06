@@ -17,3 +17,23 @@ no captured traffic evidence. Parser diagnostics omit captured contents.
 
 Check the target spelling independently: accepting a scope seed does not prove
 DNS resolution, successful HTTP responses or discovered vulnerabilities.
+
+Imports now reject exports above 64 MiB or 10,000 records. The read itself is
+bounded, including a file that grows while being read. Split larger captures
+into separate exports; the importer does not silently truncate evidence or
+return a partial record list. These are input/record limits, not a guarantee
+that total parser memory stays below 64 MiB.
+
+HAR imports reject duplicate JSON fields, non-finite JSON numbers and malformed
+entry/request/response/header/cookie containers. URL and method fields must be
+strings. UTF-8 files with a BOM are accepted. Deep JSON parser failures receive
+the same sanitized import error rather than exposing captured contents.
+
+Burp XML element/attribute DTD declarations remain supported. Entity declaration
+markers are rejected before XML parsing, including markers in UTF-16/32 files;
+this conservative check also rejects a literal declaration marker in a comment.
+Normal escaped XML text and base64 messages remain supported. Importing never
+fetches an external DTD or contacts a target.
+
+This change was reviewed from source and diff only. Runtime compatibility and
+limits are unverified; no tests, imports, scans or applications were executed.
