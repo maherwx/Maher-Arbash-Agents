@@ -65,3 +65,18 @@ Tk initialization failures return a short message and leave CLI usage available.
 Source/diff review only: no GUI launch, screenshot, tests, model, tool process,
 application, assessment or new CI run was performed. Runtime and visual appearance
 are unverified under the user's existing no-experiments restriction.
+
+Forms retain their entered values in memory while switching operations, so
+returning to a configured scope/manifest form does not reset its inputs. Values
+are not written as presets or retained after closing Maher. Authorization
+checkboxes retain their own value within that operation; no other operation is
+implicitly authorized. Changes during a running job do not change its already
+captured argv/environment.
+
+Browse controls distinguish input files, source/watch/result directories, output
+directories and output files. In particular, traffic-import output uses Save As
+instead of the directory chooser, and database output fields also use Save As.
+URL/numeric fields no longer show an unrelated file chooser. Output directory
+selection permits a new path; the original CLI remains responsible for creating
+it during execution. This form handling update was reviewed from source/diff
+only; no desktop application, test or scan was launched.

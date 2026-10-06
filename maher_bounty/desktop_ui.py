@@ -41,6 +41,7 @@ def launch_desktop(parser):
     events = queue.Queue(maxsize=4)
     state = {"running": False, "closing": False, "cancel": None}
     fields = []
+    form_values = {}
     selected = tk.StringVar(value="auto-run")
     model_path = tk.StringVar(value=os.environ.get("MAHER_GGUF_MODEL", ""))
     status = tk.StringVar(value="Ready \u2022 \u062c\u0627\u0647\u0632")
@@ -101,15 +102,23 @@ def launch_desktop(parser):
         panel.insert("1.0", content)
         panel.configure(state="disabled")
 
-    def browse(variable, directory=False):
-        path = filedialog.askdirectory(parent=window) if directory else filedialog.askopenfilename(parent=window)
+    def browse(variable, kind="file"):
+        if kind == "directory":
+            path = filedialog.askdirectory(parent=window, mustexist=False)
+        elif kind == "save":
+            path = filedialog.asksaveasfilename(parent=window)
+        else:
+            path = filedialog.askopenfilename(parent=window)
         if path:
             variable.set(path)
 
     def show_form(name):
         if state["running"]:
             return
+        if fields:
+            form_values[selected.get()] = {action.dest: variable.get() for action, flag, variable, required in fields}
         selected.set(name)
+        saved = form_values.get(name, {})
         heading.configure(text=name)
         for child in form.winfo_children():
             child.destroy()
@@ -123,18 +132,28 @@ def launch_desktop(parser):
             required = action.required or not action.option_strings
             ttk.Label(line, text=(flag or action.dest) + (" *" if required else ""), width=23).pack(side="left")
             if isinstance(action, argparse._StoreTrueAction):
-                variable = tk.BooleanVar(value=bool(action.default))
+                variable = tk.BooleanVar(value=saved.get(action.dest, bool(action.default)))
                 ttk.Checkbutton(line, variable=variable, text=action.help or action.dest).pack(side="left")
             else:
                 default = "" if action.default is None else str(action.default)
-                variable = tk.StringVar(value=default)
+                variable = tk.StringVar(value=saved.get(action.dest, default))
                 if action.choices:
                     ttk.Combobox(line, textvariable=variable, values=[str(item) for item in action.choices],
                                  state="readonly", width=32).pack(side="left", fill="x", expand=True)
                 else:
                     ttk.Entry(line, textvariable=variable).pack(side="left", fill="x", expand=True)
-                    directory = action.dest in {"source_dir", "result_dir", "watch", "out"}
-                    ttk.Button(line, text="Browse", command=lambda value=variable, folder=directory: browse(value, folder)).pack(side="left", padx=4)
+                    kind = None
+                    if action.dest in {"source_dir", "result_dir", "watch"}:
+                        kind = "directory"
+                    elif action.dest == "out":
+                        kind = "save" if name == "traffic-import" else "directory"
+                    elif action.dest in {"db", "service_db", "research_db"}:
+                        kind = "save"
+                    elif action.dest in {"scope", "rules", "inventory", "traffic", "workflow_manifest",
+                                         "api_contract", "path", "manifest", "targets", "requests"}:
+                        kind = "file"
+                    if kind:
+                        ttk.Button(line, text="Browse", command=lambda value=variable, mode=kind: browse(value, mode)).pack(side="left", padx=4)
                 if action.help:
                     ttk.Label(form, text=action.help, wraplength=700).pack(anchor="w", padx=23)
             fields.append((action, flag, variable, required))
