@@ -5,6 +5,8 @@ import os
 import tempfile
 from pathlib import Path
 
+from .json_numbers import finite_json_float
+
 
 def _canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"),
@@ -58,7 +60,7 @@ class ExecutionJournal:
         if len(data) > self.MAX_BYTES:
             raise ValueError("execution journal exceeds its size limit")
         state = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_fields,
-                           parse_constant=_invalid_constant)
+                           parse_constant=_invalid_constant, parse_float=finite_json_float)
         if not isinstance(state, dict) or state.get("version") != 2 or state.get("binding") != self.binding:
             raise ValueError("execution journal does not match the supplied scope and execution context")
         expected = {key: state.get(key) for key in ("version", "binding", "phase", "payload")}

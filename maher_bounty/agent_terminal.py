@@ -11,6 +11,7 @@ from .model_adapter import LocalModelAdapter
 from .scope_policy import filter_in_scope_urls
 from .agent_findings_report import write_agent_findings_report, summarize_execution_outcome
 from .agent_evidence_review import review_agent_evidence
+from .json_numbers import finite_json_float
 
 
 class AgentExecutionInputError(ValueError):
@@ -34,7 +35,8 @@ def load_execution_json(path):
             raw = stream.read(1048577)
         if len(raw) > 1048576:
             raise AgentExecutionInputError("execution input exceeds 1 MiB")
-        return json.loads(raw.decode("utf-8-sig"), object_pairs_hook=pairs, parse_constant=constant)
+        return json.loads(raw.decode("utf-8-sig"), object_pairs_hook=pairs,
+                          parse_constant=constant, parse_float=finite_json_float)
     except (OSError, UnicodeError, ValueError, RecursionError) as exc:
         if isinstance(exc, AgentExecutionInputError):
             raise

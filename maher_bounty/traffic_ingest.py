@@ -8,6 +8,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .json_numbers import finite_json_float
+
 
 class TrafficInputError(ValueError):
     """An explicit traffic input cannot be read or parsed."""
@@ -166,7 +168,8 @@ def _burp_identity(raw: str) -> str | None:
     return _identity_from_headers(_identity_header_map(pairs))
 def load_har(path: str | Path) -> list[dict]:
     data = json.loads(_read_export(path).decode("utf-8-sig"),
-                      object_pairs_hook=_unique_fields, parse_constant=_invalid_constant)
+                      object_pairs_hook=_unique_fields, parse_constant=_invalid_constant,
+                      parse_float=finite_json_float)
     if not isinstance(data, dict) or not isinstance(data.get("log"), dict) or not isinstance(data["log"].get("entries"), list):
         raise ValueError("HAR requires log.entries")
     if len(data["log"]["entries"]) > MAX_TRAFFIC_RECORDS:
