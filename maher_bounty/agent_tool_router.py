@@ -575,6 +575,15 @@ def run_agent_tool_requests(
                 continue
             elif tool == "naabu":
                 hostname = (urlparse(scan_url).hostname or "").lower()
+                try:
+                    ipaddress.ip_address(hostname)
+                except ValueError:
+                    runs.append({
+                        "tool": tool, "status": "blocked", "target": scan_url,
+                        "error_category": "explicit_ip_target_required",
+                        "reason": "naabu requires an explicit IP-literal URL; a domain's resolved address is not assumed to be in scope",
+                    })
+                    continue
                 command = [tool, "-host", hostname, "-top-ports", "100", "-rate", "10", "-silent"]
             elif tool == "katana":
                 command = [tool, "-u", scan_url, "-silent", "-d", "3", "-jc", "-fs", "fqdn"]
@@ -682,7 +691,9 @@ def run_agent_tool_requests(
             seen_zap_origins.add(origin)
             zap_targets.append(url)
     for index, scan_url in enumerate(zap_targets[:MAX_ZAP_ORIGINS], start=1):
-        runs.append(run_zap_baseline(scan_url, root, scope, _exec))
+        zap_run = run_zap_baseline(scan_url, root, scope, _exec)
+        findings.extend(zap_run.pop("findings", []))
+        runs.append(zap_run)
     deferred_by_agent = {}
     for row in deferred:
         deferred_by_agent.setdefault(row["agent"], []).extend(row["tool_requests"])
