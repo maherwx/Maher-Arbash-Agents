@@ -105,7 +105,8 @@ class AgentFeedbackTests(unittest.TestCase):
         rows = [{"agent": "traffic-reviewer", "tool_requests": [{"tool": "whatweb", "target_refs": "burp-1"}]}]
         with tempfile.TemporaryDirectory() as td, \
              patch("maher_bounty.agent_tool_router.shutil.which", return_value="local-tool"), \
-             patch("maher_bounty.agent_tool_router._exec", return_value={"tool": "whatweb", "status": "ok"}) as execute:
+             patch("maher_bounty.agent_tool_router._exec", return_value={"tool": "whatweb", "status": "ok"}) as execute, \
+             patch("maher_bounty.agent_feedback.build_local_tool_requests", return_value={"agent_results": []}):
             result = run_agent_tool_feedback(rows, [self.origin], td, scope={"assets": [self.origin]},
                                              target_references={"burp-1": self.origin})
         execute.assert_called_once()
