@@ -252,3 +252,25 @@ not a resume switch for full reconnaissance or authenticated workflow runs.
 
 No runtime recovery or parser execution was performed. This extension received
 source/diff review only and remains unverified at runtime.
+
+## Scanner result extraction and diagnosis
+
+The ZAP adapter retains its raw JSON report and adds bounded in-scope alert
+instances to the shared findings report. Query values are redacted in finding
+targets; scanner alerts remain candidates for review and are not marked as
+independently validated. Extraction records its parsed/partial state, row counts
+and out-of-scope drops. If a ZAP JSON report is missing, invalid, oversized or
+truncated, the run is reported as partial or failed rather than implying that
+zero alerts means a clean assessment.
+
+The local `naabu` adapter requires an IP-literal URL in the declared scope.
+It does not resolve a domain and scan the resulting shared address without
+explicit IP scope. A hostname URL is recorded as blocked with
+`explicit_ip_target_required`.
+
+When a tool exits nonzero, the live diagnostic includes bounded tails from both
+stderr and stdout with terminal color codes removed. Review the per-tool run
+record and raw ZAP report under the run's output directory for the complete
+diagnostic and evidence. A finished report with zero finding records means no
+adapter finding was extracted for that run; it is not proof that the application
+has no vulnerabilities.
