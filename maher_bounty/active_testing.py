@@ -189,6 +189,7 @@ def _directory_discovery(scan_target: str, host_dir: Path, runs: list[dict], *, 
     if parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
         runs.append({"tool": "ffuf/gobuster", "status": "skipped", "target": scan_target, "reason": "only origin URLs are eligible for content discovery"})
         return []
+    host_dir.mkdir(parents=True, exist_ok=True)
     wordlist = host_dir / "safe-content-paths.txt"
     wordlist.write_text("\n".join(SAFE_CONTENT_PATHS) + "\n", encoding="utf-8")
     output_urls = []
