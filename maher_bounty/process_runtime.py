@@ -18,7 +18,7 @@ class ProcessCancelled(subprocess.TimeoutExpired):
     """Caller requested cancellation; the tool process tree was cleaned up."""
 
 
-def _bounded_communicate(process, cmd, input, timeout, limit, text, job, cancel_event=None, truncate_output=False):
+def _bounded_communicate(process, cmd, input, timeout, limit, text, job, cancel_event=None, truncate_output=False, on_output=None):
     buffers = {"stdout": bytearray(), "stderr": bytearray()}
     exceeded = threading.Event()
     lock = threading.Lock()
@@ -39,6 +39,13 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job, cancel_
                             process._maher_output_truncated = True
                         else:
                             exceeded.set()
+                if on_output is not None:
+                    try:
+                        on_output(key, chunk)
+                    except Exception:
+                        # Progress reporting must never interrupt pipe draining
+                        # or change the tool process outcome.
+                        pass
         except (OSError, ValueError) as exc:
             with lock:
                 io_errors.append(exc)
@@ -213,7 +220,7 @@ def _kill_tree(process, job=None):
 
 def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
         text=False, timeout=None, check=False, max_output_bytes=8 * 1024 * 1024, env=None, cancel_event=None,
-        truncate_output=False):
+        truncate_output=False, on_output=None):
     if type(max_output_bytes) is not int or max_output_bytes < 1:
         raise ValueError("max_output_bytes must be a positive integer")
     if timeout is not None and (type(timeout) not in (int, float) or not math.isfinite(timeout)):
@@ -233,6 +240,8 @@ def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
     bounded = stdout == subprocess.PIPE or stderr == subprocess.PIPE
     if not isinstance(truncate_output, bool) or (truncate_output and not bounded):
         raise ValueError("output truncation requires captured output and a boolean option")
+    if on_output is not None and (not callable(on_output) or not bounded):
+        raise ValueError("live output requires a callback and captured output")
     if cancel_event is not None and (not bounded or not isinstance(cancel_event, threading.Event)):
         raise ValueError("cancellation requires captured output and a threading.Event")
     if bounded and input is not None:
@@ -254,7 +263,7 @@ def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
             job = _WindowsJob(process)
         if bounded:
             output, errors = _bounded_communicate(process, cmd, input, timeout, max_output_bytes, text, job,
-                                                cancel_event, truncate_output)
+                                                cancel_event, truncate_output, on_output)
         else:
             output, errors = process.communicate(input=input, timeout=timeout)
         result = subprocess.CompletedProcess(cmd, process.returncode, output, errors)
