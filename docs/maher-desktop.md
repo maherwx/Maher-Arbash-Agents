@@ -80,3 +80,21 @@ URL/numeric fields no longer show an unrelated file chooser. Output directory
 selection permits a new path; the original CLI remains responsible for creating
 it during execution. This form handling update was reviewed from source/diff
 only; no desktop application, test or scan was launched.
+
+The Reports tab now lists text artifacts from the actual job's captured `--out`
+path after completion and via Refresh job files. It handles output directories
+and output files, including traffic-import. Select a file and press View; manual
+Open report remains available for other locations and commands without `--out`.
+Inputs changed after launch do not replace the running job's recorded output path.
+Artifact presence is not a successful assessment or proof of a final report;
+interrupted/failed jobs can leave partial files. The viewer still previews at
+most 4 MiB without modifying the original.
+
+Discovery is read-only, at most 200 directory entries and two levels below the
+output root, with at most 32 queued directories. JSON/Markdown/text files are
+listed; child symlinks and paths resolving outside the selected output root are
+skipped. Unavailable directories and bounded/incomplete listings are explicit.
+Refresh does not scan targets, open a browser or run a model. A worker thread
+startup failure now restores the controls instead of leaving the window marked
+running indefinitely. Both changes were reviewed from source/diff only; runtime
+and appearance remain unverified, with no tests or GUI launch.

@@ -11,6 +11,42 @@ from pathlib import Path
 from .process_runtime import run, ProcessCancelled, OutputLimitExceeded
 
 
+def discover_job_reports(output_path):
+    """Read-only bounded discovery of text artifacts under the chosen job output."""
+    root = Path(output_path).resolve()
+    if root.is_file():
+        return [root], False
+    if not root.is_dir():
+        raise FileNotFoundError("Job output is unavailable")
+    pending, found, visited = [(root, 0)], [], 0
+    truncated = False
+    while pending:
+        directory, depth = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    visited += 1
+                    if visited > 200:
+                        return sorted(found), True
+                    if entry.is_symlink():
+                        continue
+                    path = Path(entry.path).resolve()
+                    try:
+                        path.relative_to(root)
+                    except ValueError:
+                        continue
+                    if entry.is_file(follow_symlinks=False) and path.suffix.lower() in {".json", ".md", ".txt"}:
+                        found.append(path)
+                    elif entry.is_dir(follow_symlinks=False):
+                        if depth < 2 and len(pending) < 32:
+                            pending.append((path, depth + 1))
+                        else:
+                            truncated = True
+        except OSError:
+            truncated = True
+    return sorted(found), truncated
+
+
 def launch_desktop(parser):
     try:
         import tkinter as tk
@@ -39,7 +75,7 @@ def launch_desktop(parser):
     style.configure("TNotebook", background="#0b1220")
     style.configure("TNotebook.Tab", padding=(18, 9))
     events = queue.Queue(maxsize=4)
-    state = {"running": False, "closing": False, "cancel": None}
+    state = {"running": False, "closing": False, "cancel": None, "job_output": None}
     fields = []
     form_values = {}
     selected = tk.StringVar(value="auto-run")
@@ -95,6 +131,9 @@ def launch_desktop(parser):
     report_buttons = ttk.Frame(report_tab)
     report_buttons.pack(fill="x", pady=(0, 8))
     report = text_panel(report_tab)
+    report_files = {}
+    chosen_report = tk.StringVar()
+    report_note = tk.StringVar(value="Choose a job output or open a report file")
 
     def replace_text(panel, content):
         panel.configure(state="normal")
@@ -207,6 +246,9 @@ def launch_desktop(parser):
             environment["MAHER_GGUF_MODEL"] = model_path.get().strip()
         else:
             environment.pop("MAHER_GGUF_MODEL", None)
+        output_value = next((variable.get() for action, flag, variable, required in fields
+                             if action.dest == "out"), None)
+        state["job_output"] = output_value
         state.update(running=True, cancel=threading.Event())
         selector.configure(state="disabled")
         start_button.configure(state="disabled")
@@ -233,27 +275,63 @@ def launch_desktop(parser):
             except Exception as exc:
                 event = ("Launch failed", type(exc).__name__ + ": " + str(exc))
             events.put(event)
-        threading.Thread(target=worker, daemon=True).start()
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except RuntimeError:
+            state["running"] = False
+            progress.stop()
+            status.set("Worker could not start")
+            selector.configure(state="normal")
+            start_button.configure(state="normal")
 
     def cancel():
         if state["running"]:
             state["cancel"].set()
             status.set("Stopping process tree \u2022 \u062c\u0627\u0631\u064d \u0627\u0644\u0625\u064a\u0642\u0627\u0641")
 
-    def open_report():
-        path = filedialog.askopenfilename(parent=window, filetypes=[("Text reports", "*.json *.md *.txt"), ("All", "*")])
-        if not path:
-            return
+    def read_report(path):
         try:
             with Path(path).open("rb") as stream:
                 raw = stream.read(4 * 1024 * 1024 + 1)
             truncated = len(raw) > 4 * 1024 * 1024
             content = raw[:4 * 1024 * 1024].decode("utf-8-sig", errors="replace")
-            replace_text(report, path + ("\n[Preview truncated; original file unchanged]" if truncated else "") + "\n\n" + content)
+            replace_text(report, str(path) + ("\n[Preview truncated; original file unchanged]" if truncated else "") + "\n\n" + content)
             notebook.select(report_tab)
         except OSError as exc:
             messagebox.showerror("Maher", str(exc), parent=window)
+
+    def open_report():
+        path = filedialog.askopenfilename(parent=window, filetypes=[("Text reports", "*.json *.md *.txt"), ("All", "*")])
+        if path:
+            read_report(path)
+
+    def refresh_reports():
+        report_files.clear()
+        if state["job_output"]:
+            try:
+                paths, partial = discover_job_reports(state["job_output"])
+                root = Path(state["job_output"]).resolve()
+                for path in paths:
+                    label = path.name if root.is_file() else str(path.relative_to(root))
+                    report_files[label] = path
+                report_note.set(f"{len(paths)} artifact(s)" + (" | bounded/incomplete listing" if partial else ""))
+            except (OSError, ValueError):
+                report_note.set("Output folder unavailable; use Open report")
+        else:
+            report_note.set("No output path recorded for this command")
+        report_picker.configure(values=list(report_files))
+        chosen_report.set(next(iter(report_files), ""))
+
+    def open_selected_report():
+        path = report_files.get(chosen_report.get())
+        if path is not None:
+            read_report(path)
     ttk.Button(report_buttons, text="Open report / \u0641\u062a\u062d \u062a\u0642\u0631\u064a\u0631", command=open_report).pack(side="left")
+    ttk.Button(report_buttons, text="Refresh job files", command=refresh_reports).pack(side="left", padx=4)
+    report_picker = ttk.Combobox(report_buttons, textvariable=chosen_report, state="readonly", width=36)
+    report_picker.pack(side="left", fill="x", expand=True, padx=4)
+    ttk.Button(report_buttons, text="View", command=open_selected_report).pack(side="left")
+    ttk.Label(report_tab, textvariable=report_note).pack(side="bottom", anchor="w")
     controls = ttk.Frame(main, padding=(0, 12, 0, 0))
     controls.pack(fill="x")
     ttk.Label(controls, text="Local GGUF (optional)").pack(side="left")
@@ -279,6 +357,7 @@ def launch_desktop(parser):
             start_button.configure(state="normal")
             # Bound the desktop preview independently of preserved tool artifacts.
             replace_text(output, ("[Output preview truncated]\n" if len(content) > 200000 else "") + content[-200000:])
+            refresh_reports()
             if state["closing"]:
                 window.destroy()
                 return
