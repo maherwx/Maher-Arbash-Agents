@@ -30,18 +30,21 @@ example, the agents now include a fixed `sslscan` adapter for in-scope HTTPS
 origins. Its host/port arguments are chosen by the adapter and HTTP targets are
 filtered. Agents still cannot supply arbitrary shell commands or flags.
 
-Direct agent execution offers a single-URL field, four tool profiles, optional
-Burp/ZAP traffic export, ten common adapter choices, and a local-model-only
-operator brief. Explicit adapter choices restrict all rounds to those selected
-fixed adapters; leaving every box empty uses the readiness-aware coordinator.
+Direct agent execution offers a single-URL field, four tool profiles, ten common
+adapter choices, and a local-model-only operator brief. Entering a URL is enough;
+that host becomes the scope when no scope file is supplied. The authorization
+checkbox is still required. Explicit adapter choices restrict all rounds to those
+selected fixed adapters; leaving every box empty uses all installed adapters
+allowed by the readiness-aware coordinator.
 The profile and selected adapter set constrain every round, including local
 model proposals. Nmap, ZAP, SSLScan, browser and discovery choices use their
-existing bounded adapters. A Burp XML or ZAP HAR file is optional; leave it
-empty when starting from a URL. Select a saved export only when you already
-have one. The file button imports captured request URLs; Maher does not start
-either proxy application or import its login credentials. Imported URLs are
-scope filtered and capped. Authenticated browser checks accept the explicit supplied
-workflow profile, without inventing login or credentials.
+existing bounded adapters. ZAP Baseline runs directly from the URL when installed.
+Maher does not launch Burp as an automated scanner. PortSwigger documents Burp
+Scanner as a Professional/DAST feature, unavailable in Community Edition, and
+desktop scans start through Burp's scan launcher ([guide](https://portswigger.net/burp/documentation/desktop/getting-started/running-your-first-scan)).
+Existing traffic import remains available through the CLI for saved Burp XML or
+ZAP HAR exports; it only adds in-scope URLs. Authenticated browser checks accept
+the explicit supplied workflow profile, without inventing login or credentials.
 
 The operator brief requires an already configured local GGUF model. It guides
 which permitted checks the local reviewers prioritize and cannot expand scope,
