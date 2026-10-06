@@ -69,6 +69,19 @@ def _rule_languages(files):
     return sorted(present & (PATTERNS.keys() | TAINT_RULES.keys()))
 
 
+def _staged_source_path(source: Path, relative: str) -> Path | None:
+    """Resolve one snapshot path strictly beneath the temporary source root."""
+    if not isinstance(relative, str) or not relative or "\x00" in relative:
+        return None
+    root = source.resolve()
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
 def _review_semgrep(snapshots, files):
     languages = _rule_languages(files)
     taint_languages = sorted({row["language"] for row in files if isinstance(row, dict)} & TAINT_RULES.keys())
@@ -102,10 +115,15 @@ def _review_semgrep(snapshots, files):
     with tempfile.TemporaryDirectory(prefix="maher-source-") as directory:
         staging = Path(directory)
         source = staging / "source"
+        rejected_snapshot_count = 0
         for relative, data in snapshots.items():
-            if known[relative]["language"] not in languages:
+            file_info = known.get(relative) if isinstance(relative, str) else None
+            if not isinstance(file_info, dict) or file_info.get("language") not in languages:
                 continue
-            target = source / relative
+            target = _staged_source_path(source, relative)
+            if target is None or not isinstance(data, bytes):
+                rejected_snapshot_count += 1
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
         config = staging / "rules.yaml"
@@ -122,8 +140,11 @@ def _review_semgrep(snapshots, files):
             if not isinstance(data, dict) or not isinstance(data.get("results"), list):
                 raise ValueError("invalid local scanner output")
             metadata["status"] = "ok" if completed.returncode == 0 and not data.get("errors") else "partial"
+            if rejected_snapshot_count:
+                metadata["status"] = "partial"
             metadata["returncode"] = completed.returncode
             metadata["error_count"] = len(data.get("errors", [])) if isinstance(data.get("errors"), list) else 1
+            metadata["error_count"] += rejected_snapshot_count
             metadata["result_truncated"] = len(data["results"]) > 200
             if metadata["result_truncated"]:
                 metadata["status"] = "partial"
@@ -156,14 +177,14 @@ def _review_semgrep(snapshots, files):
                 line = start.get("line") if isinstance(start, dict) else None
                 if relative is None or type(line) is not int or line < 1:
                     continue
-                is_taint_flow = item["check_id"] in taint_rule_ids
                 findings.append({"title": "Sensitive API or sink requires manual input/control review",
                     "file": relative, "file_sha256": known[relative]["sha256"], "line": line,
                     "rule_id": item["check_id"], "source": "local_semgrep_ce", "validated": False,
                     "status": "needs_review",
-                    "confidence": "intrafile_taint_candidate" if is_taint_flow else "structural_pattern",
+                    "confidence": ("intrafile_taint_candidate" if item["check_id"] in taint_rule_ids
+                                   else "structural_pattern"),
                     "evidence": ("Local CE taint rule matched a configured source-to-sink flow; confirm framework semantics and sanitization"
-                                 if is_taint_flow else
+                                 if item["check_id"] in taint_rule_ids else
                                  "Local parser rule matched a sensitive sink; no input-taint or runtime proof")})
             return metadata, findings
         except OutputLimitExceeded:
@@ -184,3 +205,4 @@ def review_semgrep(snapshots, files):
                 "rule_languages": _rule_languages(files),
                 "taint_rule_languages": sorted({row["language"] for row in files if isinstance(row, dict)} & TAINT_RULES.keys()),
                 "scanned_files": [], "error_count": 1, "error_type": type(error).__name__}, []
+
