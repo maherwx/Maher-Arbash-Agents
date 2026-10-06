@@ -21,6 +21,7 @@ _AGENT_CONTEXT_FIELDS = (
     "research_directives",
     "research_method",
     "execution_feedback",
+    "tool_availability",
     "source_review",
     "source_check_plan",
     "source_check_admission_audit",
@@ -96,6 +97,9 @@ _SYSTEM_PROMPT = (
     "it does not verify that the source is the deployed handler or that a candidate is exploitable. "
     "When execution_feedback is supplied, review actual completed tool runs and peers' evidence, "
     "then request a complementary unattempted check only when those results justify it. "
+    "The evidence packet may include tool_availability with the selected profile and local prerequisite snapshot. "
+    "Prefer currently available adapters; availability is based only on PATH/package metadata, not proof a tool runs. "
+    "The executor independently enforces the selected profile and exact scoped targets. "
     "If can_schedule_next_round is false, return no tool_requests and summarize execution evidence. "
     "Prefer safe, non-destructive validation and respect all program "
     "rules. Return JSON only with keys: status, observations, candidate_findings, evidence_notes, "

@@ -62,8 +62,10 @@ includes crawlers, route and asset sources; network includes host/port and TLS
 adapters. The selected profile and a local prerequisite snapshot are recorded
 in `agent-tool-plan.json` and `agent-tool-results.json`. The snapshot only
 checks `PATH` and Playwright package metadata; it does not run tools or verify
-that a browser can launch. A profile does not bypass scope admission, per-tool
-budgets or exact-known-target checks.
+that a browser can launch. Local model reviewers receive this prerequisite
+summary and are instructed to prefer available adapters. It is advisory; the
+executor still enforces the selected profile, scope admission, per-tool budgets
+and exact-known-target checks.
 
 Supported adapters include httpx, katana, nuclei, dalfox, ZAP baseline, nmap,
 sslscan, ffuf and the other router tools. sslscan is limited to HTTPS origins

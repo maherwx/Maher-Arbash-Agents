@@ -112,6 +112,16 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
     if model is not None and not model.enabled:
         # An explicit model request must not silently turn into fixed planning.
         raise AgentExecutionInputError("local GGUF model unavailable; configure MAHER_GGUF_MODEL and local-inference")
+    allowed_tools = set(AGENT_TOOL_PROFILES[tool_profile])
+    readiness = tool_readiness_snapshot()
+    selected_readiness = [row for row in readiness["tools"] if row["tool"] in allowed_tools]
+    availability_context = {
+        "selected_profile": tool_profile,
+        "selected_tools": sorted(allowed_tools),
+        "currently_available": sorted(row["tool"] for row in selected_readiness if row["available"]),
+        "unavailable_or_unverified": sorted(row["tool"] for row in selected_readiness if not row["available"]),
+        "basis": "PATH and Python package metadata only; no commands launched",
+    }
     roles = [
         {"id": "web_surface_reviewer", "mission": "Plan complementary scoped local tool checks from observed web evidence."},
         {"id": "evidence_reviewer", "mission": "Review actual execution failures and findings; distinguish candidates from proof."},
@@ -128,12 +138,12 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
                 "validated_evidence": review_agent_evidence(packet["findings"], packet["runs"], packet["known_urls"], scope),
                 "prior_agent_evidence": outputs,
                 "research_method": {"can_schedule_next_round": packet["can_schedule_next_round"]},
+                "tool_availability": availability_context,
             })
             outputs.append(output)
         reviews.append({"round": packet["round"], "agents": outputs})
         return outputs
 
-    allowed_tools = set(AGENT_TOOL_PROFILES[tool_profile])
     native = build_local_tool_requests(known, scope=scope, enabled_tools=allowed_tools)
     packets = list(requests) if requests is not None else list(native["agent_results"])
     if model is not None:
@@ -146,7 +156,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
                                  "selected_profile": tool_profile,
                                  "selected_tools": sorted(allowed_tools),
                                  "arbitrary_shell_commands": False, "agent_selected_executable_paths": False},
-            "tool_readiness": tool_readiness_snapshot(),
+            "tool_readiness": readiness,
             "plan_only": plan_only, "execution_started": False}
     # Preserve the original plan on recovery, including if binding validation
     # later rejects changed inputs. No report/result files are written yet.
