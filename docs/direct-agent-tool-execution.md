@@ -74,3 +74,39 @@ sensitive URLs, tool output and model excerpts; keep them private. Checkpoints
 support existing programmatic recovery, but this command does not expose resume.
 Use a fresh output directory; a new invocation must not be treated as a continuation
 or automatically repeat uncertain prior mutation effects.
+
+## Complete recorded finding report
+
+At the end of actual execution the command writes `findings-report.json` and
+`findings-report.md` and prints their paths. Every finding in the tool execution
+ledger is included, with its entire original record, source fields, exact-record
+hash, verification label and missing-detail list. Exact duplicates remain visible
+with occurrence counts; nothing is silently discarded or promoted by deduplication.
+Each record keeps the evidence, target, severity, reproduction, impact and
+remediation that its adapter actually supplied. Missing details are explicitly
+listed rather than generated as unsupported claims. Tool-reported `validated`
+is labeled `tool_reported_validated`, not independently confirmed impact.
+
+All candidate findings returned in recorded local model reviews are included in
+a separate unverified hypothesis section. They never become tool-validated
+findings by appearing in the report. Findings without an adapter validation flag
+remain candidates for review. The execution section retains all recorded runs,
+decisions, rounds, initial targets, scope, status counts, stop reason and deferred
+request count, including failed/missing tools. This is complete coverage of the
+recorded ledgers, not all possible vulnerabilities or every unparsed message in
+raw tool output. No exploit instructions, remediation or impact are invented.
+
+The plan also records the supported-tool execution policy: fixed tool adapters,
+no arbitrary shell text or agent-selected executable paths. The existing router
+enforces those restrictions at execution time. These reports add no general
+terminal, file-management or package-installation privileges.
+
+Actual execution results are saved before report rendering. Report publication
+failure does not remove that results artifact; the CLI reports an error directing
+the user to it. Markdown is atomically replaced with a 16 MiB cap, authoritative
+JSON uses the existing 8 MiB cap. Exceeding a cap fails explicitly instead of
+truncating finding records. Both reports identify the same generation hash;
+compare hashes before combining them after interruption/concurrent writers.
+This is not a two-file transaction. Reports contain sensitive originals and
+must remain private. No tests/tools/models/applications were run to verify this
+addition; it remains unverified at runtime.

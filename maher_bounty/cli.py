@@ -148,6 +148,7 @@ def _main():
             authorized=a.authorized, requests=load_execution_json(a.requests) if a.requests else None,
             local_model=a.local_model, plan_only=a.plan_only, max_rounds=a.rounds)
         print(json.dumps({"status": result["status"], "run_status_counts": result.get("run_status_counts", {}),
+                          "finding_report": result.get("finding_report"),
                           "out": a.out}, indent=2))
         return 0
     if a.cmd == "policy-agents-run":

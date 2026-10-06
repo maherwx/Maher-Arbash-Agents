@@ -9,6 +9,7 @@ from .agent_tool_router import build_local_tool_requests, SUPPORTED_AGENT_TOOLS
 from .artifact_io import write_json_atomic
 from .model_adapter import LocalModelAdapter
 from .scope_policy import filter_in_scope_urls
+from .agent_findings_report import write_agent_findings_report
 
 
 class AgentExecutionInputError(ValueError):
@@ -126,6 +127,8 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
     plan = {"mode": "local_gguf_plus_native" if model else "native_fixed_planner",
             "model_inference_enabled": model is not None, "initial_targets": known,
             "initial_requests": packets, "max_rounds": max_rounds,
+            "execution_policy": {"supported_tools": sorted(SUPPORTED_AGENT_TOOLS - {"browser-xss-auth"}),
+                                 "arbitrary_shell_commands": False, "agent_selected_executable_paths": False},
             "plan_only": plan_only, "execution_started": False}
     write_json_atomic(root / "agent-tool-plan.json", plan)
     if plan_only:
@@ -141,5 +144,12 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
               "limitations": ["process exit success does not prove vulnerability absence or exploit validity",
                               "native planning is fixed rules; model roles share one supplied local GGUF instance",
                               "only supported tool adapters execute; no arbitrary shell command generation"]}
+    # Save actual execution before report rendering, preserving results if a
+    # report artifact exceeds its size budget or publication fails.
+    write_json_atomic(root / "agent-tool-results.json", result)
+    try:
+        result["finding_report"] = write_agent_findings_report(result, scope, known, root)
+    except (OSError, ValueError) as exc:
+        raise AgentExecutionInputError("finding report publication failed; inspect preserved agent-tool-results.json") from exc
     write_json_atomic(root / "agent-tool-results.json", result)
     return result
