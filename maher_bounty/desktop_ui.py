@@ -51,6 +51,7 @@ OPERATION_DESCRIPTIONS["agent-tools-run"] = (
     "الرابط يحدد المضيف نطاقًا تلقائيًا. ZAP والمحوّلات المثبتة تعمل مباشرة؛ Burp لا يُشغّل كفاحص تلقائي من هذا الأمر. "
     "\u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0643 \u062a\u062d\u062a\u0627\u062c \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u062d\u0644\u064a\u064b\u0627\u060c \u0648\u062a\u0628\u0642\u0649 \u0645\u0642\u064a\u062f\u0629 \u0628\u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0648\u0627\u0644\u0642\u0648\u0627\u0644\u0628 \u0648\u0627\u0644\u0646\u0637\u0627\u0642."
 )
+OPERATION_DESCRIPTIONS["agent-tools-run"] = "أدخل رابطًا وأكّد الإذن. سيشغّل المنسّق المحلي المحوّلات المثبتة والمتاحة ضمن مضيف الرابط. لا تحتاج إلى ملفات؛ فحص تسجيل الدخول يحتاج هوية وسير عمل مصرّحًا بهما مسبقًا."
 FIELD_LABELS = {
     "target": "\u0631\u0627\u0628\u0637 \u0627\u0644\u0645\u0648\u0642\u0639 \u0627\u0644\u0645\u0635\u0631\u0651\u062d", "targets": "\u0645\u0644\u0641 \u0631\u0648\u0627\u0628\u0637 \u0627\u0644\u0623\u0647\u062f\u0627\u0641",
     "scope": "\u0645\u0644\u0641 \u0627\u0644\u0646\u0637\u0627\u0642 \u0627\u0644\u0645\u0633\u0645\u0648\u062d", "rules": "\u0645\u0644\u0641 \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0641\u062d\u0635",
@@ -157,6 +158,9 @@ def launch_desktop(parser):
     style.configure("TLabel", background="#0b1220", foreground="#dce7f5")
     style.configure("Title.TLabel", font=("Segoe UI", 27, "bold"), foreground="#53e0c0")
     style.configure("TButton", padding=(12, 8))
+    style.configure("Primary.TButton", padding=(18, 10), font=("Segoe UI", 11, "bold"))
+    style.configure("Primary.TButton", background="#167a70", foreground="#ffffff")
+    style.map("Primary.TButton", background=[("active", "#209688"), ("disabled", "#46545e")])
     style.configure("TCheckbutton", background="#0b1220", foreground="#dce7f5")
     style.configure("TNotebook", background="#0b1220")
     style.configure("TNotebook.Tab", padding=(18, 9))
@@ -166,7 +170,7 @@ def launch_desktop(parser):
     form_values = {}
     selected_tool_vars = {}
     operator_brief_box = None
-    selected = tk.StringVar(value="auto-run")
+    selected = tk.StringVar(value="agent-tools-run")
     model_path = tk.StringVar(value=os.environ.get("MAHER_GGUF_MODEL", ""))
     status = tk.StringVar(value="Ready \u2022 \u062c\u0627\u0647\u0632")
 
@@ -180,7 +184,7 @@ def launch_desktop(parser):
     navigation = ttk.Frame(body, padding=(0, 0, 20, 0))
     navigation.pack(side="left", fill="y")
     ttk.Label(navigation, text="OPERATIONS / \u0627\u0644\u0639\u0645\u0644\u064a\u0627\u062a").pack(anchor="w", pady=(0, 10))
-    category = tk.StringVar(value=OPERATION_GROUPS["auto-run"])
+    category = tk.StringVar(value=OPERATION_GROUPS["agent-tools-run"])
     category_picker = ttk.Combobox(navigation, textvariable=category,
                                    values=list(dict.fromkeys(OPERATION_GROUPS.values())),
                                    state="readonly", width=23)
@@ -197,7 +201,8 @@ def launch_desktop(parser):
         for name in visible_names:
             selector.insert("end", display_names[name])
         if visible_names:
-            default_name = "auto-run" if "auto-run" in visible_names else visible_names[0]
+            preferred = "agent-tools-run" if "agent-tools-run" in visible_names else "auto-run"
+            default_name = preferred if preferred in visible_names else visible_names[0]
             selector.selection_set(visible_names.index(default_name))
             show_form(default_name)
     category_picker.bind("<<ComboboxSelected>>", refresh_operations)
@@ -207,6 +212,9 @@ def launch_desktop(parser):
     heading.pack(anchor="w", pady=(0, 10))
     description = ttk.Label(main, text="", wraplength=850, justify="left")
     description.pack(anchor="w", pady=(0, 9))
+    execute_button = ttk.Button(main, text="Run / تشغيل", style="Primary.TButton",
+                                command=lambda: execute())
+    execute_button.pack(anchor="e", pady=(0, 8))
     notebook = ttk.Notebook(main)
     notebook.pack(fill="both", expand=True)
     form_tab, output_tab, report_tab = (ttk.Frame(notebook, padding=12) for _ in range(3))
@@ -268,6 +276,10 @@ def launch_desktop(parser):
                 saved_values["_operator_brief"] = operator_brief_box.get("1.0", "end-1c")
             form_values[selected.get()] = saved_values
         selected.set(name)
+        if name == "agent-tools-run":
+            model_controls.pack_forget()
+        elif not model_controls.winfo_manager():
+            model_controls.pack(side="left")
         saved = form_values.get(name, {})
         heading.configure(text=display_names.get(name, name.replace("-", " ").title()))
         description.configure(text=OPERATION_DESCRIPTIONS.get(name, "Use the fields below to run this local CLI operation."))
@@ -279,32 +291,12 @@ def launch_desktop(parser):
         for action in commands[name]._actions:
             if isinstance(action, argparse._HelpAction):
                 continue
-            if name == "agent-tools-run" and action.dest == "targets":
-                # The guided screen accepts a single exact URL. The CLI still accepts URL-list files.
-                continue
-            if name == "agent-tools-run" and action.dest == "scope":
-                # A single URL supplies the default exact-host scope for this guided command.
-                continue
-            if name == "agent-tools-run" and action.dest == "traffic":
-                # The guided URL flow does not require a proxy export file.
-                continue
-            if name == "agent-tools-run" and action.dest == "tool":
-                tool_box = ttk.LabelFrame(form, text="حدد الأدوات أو اتركها فارغة لتشغيل كل المثبت منها", padding=8)
-                tool_box.pack(fill="x", pady=8)
-                for index, (tool, label_text) in enumerate(ADVANCED_TOOL_CHOICES):
-                    variable = tk.BooleanVar(value=tool in saved.get("_selected_tools", []))
-                    selected_tool_vars[tool] = variable
-                    ttk.Checkbutton(tool_box, text=label_text, variable=variable).grid(
-                        row=index // 2, column=index % 2, sticky="w", padx=5, pady=3)
-                continue
-            if name == "agent-tools-run" and action.dest == "operator_brief":
-                brief_box = ttk.LabelFrame(form, text="\u062a\u0639\u0644\u064a\u0645\u0627\u062a \u0644\u0644\u0645\u0631\u0627\u062c\u0639\u064a\u0646 \u0627\u0644\u0645\u062d\u0644\u064a\u064a\u0646", padding=8)
-                brief_box.pack(fill="x", pady=8)
-                ttk.Label(brief_box, text="\u064a\u062a\u0637\u0644\u0628 \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u062d\u0644\u064a\u064b\u0627. \u0627\u0644\u062a\u0648\u062c\u064a\u0647 \u064a\u062e\u062a\u0627\u0631 \u0645\u0646 \u0627\u0644\u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0627\u0644\u0645\u0633\u0645\u0648\u062d\u0629 \u0641\u0642\u0637.",
-                          wraplength=700).pack(anchor="w")
-                operator_brief_box = tk.Text(brief_box, height=5, wrap="word")
-                operator_brief_box.pack(fill="x", pady=(6, 0))
-                operator_brief_box.insert("1.0", saved.get("_operator_brief", ""))
+            if name == "agent-tools-run" and action.dest in {
+                "targets", "scope", "traffic", "tool", "operator_brief",
+                "workflow_manifest", "requests", "local_model", "plan_only",
+                "resume", "rounds", "tool_profile", "out",
+            }:
+                # The guided URL flow uses CLI defaults and needs no uploaded files.
                 continue
             line = ttk.Frame(form, padding=(0, 6))
             line.pack(fill="x")
@@ -346,9 +338,12 @@ def launch_desktop(parser):
                     ttk.Label(form, text=help_text, wraplength=700).pack(anchor="w", padx=29)
             fields.append((action, flag, variable, required))
         if name == "agent-tools-run":
-            note = ttk.Label(form, text="أدخل الرابط فقط وأكّد الإذن. ترك خيارات الأدوات فارغة يشغّل المحوّلات المثبتة المسموحة. يعمل ZAP وأدوات الطرفية مباشرة؛ Burp لا يُشغّل كفاحص تلقائي من هذا الأمر.",
+            execute_button.configure(text="ابدأ فحص الرابط  /  Start URL scan")
+            note = ttk.Label(form, text="أدخل الرابط وأكّد الإذن، ثم اضغط زر التنفيذ أعلاه. لا تحتاج إلى رفع ملفات؛ ستُشغّل المحوّلات المحلية المثبتة والمتاحة ضمن مضيف الرابط. فحص تسجيل الدخول يحتاج هوية وسير عمل مصرّحًا بهما مسبقًا.",
                              wraplength=730, justify="left")
             note.pack(anchor="w", pady=(3, 8))
+        else:
+            execute_button.configure(text="Run / تشغيل")
         if name == "agent-tools-run":
             from .tool_readiness import tool_readiness_snapshot
 
@@ -386,6 +381,11 @@ def launch_desktop(parser):
 
     def command():
         argv = [selected.get()]
+        if selected.get() == "agent-tools-run" and not any(
+            action.dest == "authorized" and variable.get()
+            for action, _flag, variable, _required in fields
+        ):
+            raise ValueError("Confirm that you are authorized to assess this URL before execution.")
         for action, flag, variable, required in fields:
             value = variable.get()
             if isinstance(action, argparse._StoreTrueAction):
@@ -440,10 +440,13 @@ def launch_desktop(parser):
             environment.pop("MAHER_GGUF_MODEL", None)
         output_value = next((variable.get() for action, flag, variable, required in fields
                              if action.dest == "out"), None)
+        if selected.get() == "agent-tools-run" and output_value is None:
+            output_value = next((action.default for action in commands[selected.get()]._actions
+                                 if action.dest == "out"), None)
         state["job_output"] = output_value
         state.update(running=True, cancel=threading.Event())
         selector.configure(state="disabled")
-        start_button.configure(state="disabled")
+        execute_button.configure(state="disabled")
         status.set("Running \u2022 \u0642\u064a\u062f \u0627\u0644\u062a\u0646\u0641\u064a\u0630")
         progress.start(12)
         replace_text(output, display_command(argv) + "\n\nRunning. Captured logs appear when this job ends.\n")
@@ -474,7 +477,7 @@ def launch_desktop(parser):
             progress.stop()
             status.set("Worker could not start")
             selector.configure(state="normal")
-            start_button.configure(state="normal")
+            execute_button.configure(state="normal")
 
     def cancel():
         if state["running"]:
@@ -526,13 +529,13 @@ def launch_desktop(parser):
     ttk.Label(report_tab, textvariable=report_note).pack(side="bottom", anchor="w")
     controls = ttk.Frame(main, padding=(0, 12, 0, 0))
     controls.pack(fill="x")
-    ttk.Label(controls, text="Local GGUF (optional)").pack(side="left")
-    ttk.Entry(controls, textvariable=model_path, width=28).pack(side="left", padx=7)
-    ttk.Button(controls, text="Browse", command=lambda: browse(model_path)).pack(side="left")
+    model_controls = ttk.Frame(controls)
+    model_controls.pack(side="left")
+    ttk.Label(model_controls, text="Local GGUF (optional)").pack(side="left")
+    ttk.Entry(model_controls, textvariable=model_path, width=28).pack(side="left", padx=7)
+    ttk.Button(model_controls, text="Browse", command=lambda: browse(model_path)).pack(side="left")
     ttk.Button(controls, text="Preview", command=preview).pack(side="right", padx=4)
     ttk.Button(controls, text="Stop", command=cancel).pack(side="right", padx=4)
-    start_button = ttk.Button(controls, text="Run / \u062a\u0634\u063a\u064a\u0644", command=execute)
-    start_button.pack(side="right", padx=4)
     progress = ttk.Progressbar(main, mode="indeterminate")
     progress.pack(fill="x", pady=(10, 0))
 
@@ -546,7 +549,7 @@ def launch_desktop(parser):
             progress.stop()
             status.set(label)
             selector.configure(state="normal")
-            start_button.configure(state="normal")
+            execute_button.configure(state="normal")
             # Bound the desktop preview independently of preserved tool artifacts.
             replace_text(output, ("[Output preview truncated]\n" if len(content) > 200000 else "") + content[-200000:])
             refresh_reports()
