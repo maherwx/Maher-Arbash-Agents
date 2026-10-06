@@ -23,6 +23,7 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job, cancel_
     exceeded = threading.Event()
     lock = threading.Lock()
     threads = []
+    owned_streams = []
     io_errors = []
     def reader(stream, key):
         try:
@@ -38,37 +39,53 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job, cancel_
                             process._maher_output_truncated = True
                         else:
                             exceeded.set()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             with lock:
                 io_errors.append(exc)
             exceeded.set()
         finally:
-            stream.close()
-    for key in buffers:
-        stream = getattr(process, key)
-        if stream:
-            thread = threading.Thread(target=reader, args=(stream, key), daemon=True)
-            thread.start()
-            threads.append(thread)
+            try:
+                stream.close()
+            except (OSError, ValueError) as exc:
+                with lock:
+                    io_errors.append(exc)
+                exceeded.set()
     def writer():
         try:
             process.stdin.write(input)
             process.stdin.flush()
         except BrokenPipeError:
             pass
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             with lock:
                 io_errors.append(exc)
             exceeded.set()
         finally:
-            process.stdin.close()
-    if input is not None:
-        thread = threading.Thread(target=writer, daemon=True)
-        thread.start()
-        threads.append(thread)
+            try:
+                process.stdin.close()
+            except BrokenPipeError:
+                pass
+            except (OSError, ValueError) as exc:
+                with lock:
+                    io_errors.append(exc)
+                exceeded.set()
     deadline = time.monotonic() + timeout if timeout is not None else None
     failure = None
     try:
+        # Setup belongs inside the cleanup boundary: a later reader/writer
+        # thread can fail to start after earlier threads already own pipes.
+        for key in buffers:
+            stream = getattr(process, key)
+            if stream:
+                thread = threading.Thread(target=reader, args=(stream, key), daemon=True)
+                thread.start()
+                owned_streams.append(stream)
+                threads.append(thread)
+        if input is not None:
+            thread = threading.Thread(target=writer, daemon=True)
+            thread.start()
+            owned_streams.append(process.stdin)
+            threads.append(thread)
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 failure = "cancelled"
@@ -82,6 +99,10 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job, cancel_
                 failure = "timeout"
                 break
             exceeded.wait(0.01)
+    except BaseException:
+        # Preserve the original startup/interrupt error after bounded cleanup.
+        failure = failure or "interrupted"
+        raise
     finally:
         if exceeded.is_set() and failure is None:
             failure = "output"
@@ -102,6 +123,15 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job, cancel_
             process.wait(timeout=max(0.01, cleanup_deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             pass
+        # Unstarted I/O workers never took ownership of these handles. Avoid
+        # closing a live reader's stream: an escaped descendant can hold its
+        # buffered stream lock, exceeding the cleanup deadline.
+        for stream in (process.stdout, process.stderr, process.stdin):
+            if stream is not None and stream not in owned_streams:
+                try:
+                    stream.close()
+                except (OSError, ValueError):
+                    pass
     with lock:
         def captured(key):
             if getattr(process, key) is None:
@@ -209,6 +239,13 @@ def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
         # Encode on the calling thread before launch; writer-thread failures
         # must not silently turn missing input into a successful tool run.
         input = input.encode("utf-8") if text else bytes(input)
+    if cancel_event is not None and cancel_event.is_set():
+        # No child has been created yet. Rechecking in the communication loop
+        # handles requests arriving after this check (not an atomic launch gate).
+        empty = "" if text else b""
+        raise ProcessCancelled(cmd, timeout,
+                               output=empty if stdout == subprocess.PIPE else None,
+                               stderr=empty if stderr == subprocess.PIPE else None)
     process = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else None,
                                stdout=stdout, stderr=stderr, text=text and not bounded, env=env, **options)
     job = None
