@@ -124,8 +124,13 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
                        "invalid_urls_dropped": 0, "url_limit_dropped": 0}
     if traffic_path:
         records = ingest_traffic(traffic_path, kind="auto")
-        observed = [row.get("url") for row in records if isinstance(row, dict)
-                    and isinstance(row.get("url"), str)]
+        observed = []
+        invalid_record_count = 0
+        for row in records:
+            if isinstance(row, dict) and isinstance(row.get("url"), str):
+                observed.append(row["url"])
+            else:
+                invalid_record_count += 1
         valid_observed = []
         for value in observed:
             if len(value) > 8192 or value != value.strip():
@@ -139,7 +144,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
             except ValueError:
                 continue
             valid_observed.append(value)
-        traffic_summary["invalid_urls_dropped"] = len(observed) - len(valid_observed)
+        traffic_summary["invalid_urls_dropped"] = invalid_record_count + len(observed) - len(valid_observed)
         traffic_urls, outside_traffic = filter_in_scope_urls(valid_observed, scope)
         traffic_summary["imported_records"] = len(records)
         traffic_summary["out_of_scope_urls_dropped"] = len(outside_traffic)
