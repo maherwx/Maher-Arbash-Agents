@@ -36,9 +36,11 @@ operator brief. Explicit adapter choices restrict all rounds to those selected
 fixed adapters; leaving every box empty uses the readiness-aware coordinator.
 The profile and selected adapter set constrain every round, including local
 model proposals. Nmap, ZAP, SSLScan, browser and discovery choices use their
-existing bounded adapters. The Burp/ZAP file button imports captured request
-URLs; Maher does not start either proxy application. Imported URLs are scope
-filtered and capped. Authenticated browser checks accept the explicit supplied
+existing bounded adapters. A Burp XML or ZAP HAR file is optional; leave it
+empty when starting from a URL. Select a saved export only when you already
+have one. The file button imports captured request URLs; Maher does not start
+either proxy application or import its login credentials. Imported URLs are
+scope filtered and capped. Authenticated browser checks accept the explicit supplied
 workflow profile, without inventing login or credentials.
 
 The operator brief requires an already configured local GGUF model. It guides
