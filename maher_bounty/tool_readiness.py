@@ -14,13 +14,14 @@ EXECUTABLES = {
     "dnsx": ("dnsx",), "naabu": ("naabu",), "ffuf": ("ffuf",),
     "gobuster": ("gobuster",), "subfinder": ("subfinder",),
     "assetfinder": ("assetfinder",), "waybackurls": ("waybackurls",),
-    "gau": ("gau",), "alterx": ("alterx",),
+    "gau": ("gau",), "alterx": ("alterx",), "arjun": ("arjun",),
 }
 
 TOOL_DESCRIPTIONS = {
     "browser-xss": "\u0641\u062d\u0635 \u0645\u062d\u0644\u064a \u0644\u0644\u0645\u062a\u0635\u0641\u062d (Playwright)",
     "browser-xss-auth": "\u064a\u062a\u0637\u0644\u0628 \u0645\u0644\u0641 \u0633\u064a\u0631 \u0639\u0645\u0644 \u0645\u0635\u0627\u062f\u0642\u0627\u062a\u060c \u0644\u064a\u0633 \u062a\u0634\u063a\u064a\u0644\u064b\u0627 \u0645\u0628\u0627\u0634\u0631\u064b\u0627",
     "zap-baseline.py": "\u0645\u062d\u0648\u0651\u0644 ZAP \u0627\u0644\u0645\u062d\u0644\u064a \u0623\u0648 \u0648\u0627\u062c\u0647\u0629 ZAP CLI",
+    "arjun": "\u0627\u0643\u062a\u0634\u0627\u0641 GET \u0644\u0623\u0633\u0645\u0627\u0621 \u0627\u0644\u0645\u0639\u0627\u0645\u0644\u0627\u062a \u0644\u0644\u0631\u0648\u0627\u0628\u0637 \u0627\u0644\u0645\u0635\u0631\u062d\u0629",
 }
 
 
