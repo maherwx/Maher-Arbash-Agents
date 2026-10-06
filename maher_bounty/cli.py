@@ -2,6 +2,7 @@ import argparse
 import json
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from .orchestrator import run, run_target
@@ -40,6 +41,17 @@ def _service_config(args):
         retry_limit=args.retries,
         retry_backoff_seconds=args.backoff,
     )
+
+
+def _fresh_agent_output_dir():
+    base = Path("results/agent-tools")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    candidate = base.with_name(f"{base.name}-{stamp}")
+    suffix = 1
+    while candidate.exists():
+        candidate = base.with_name(f"{base.name}-{stamp}-{suffix}")
+        suffix += 1
+    return str(candidate)
 
 
 def main():
@@ -112,7 +124,8 @@ def build_parser():
     terminal.add_argument("--tool-profile", choices=["all", "web", "discovery", "network"], default="all",
                           help="Restrict fixed local adapters to all, web, discovery, or network/TLS tools")
     terminal.add_argument("--workflow-manifest", help="Local manifest with an explicit browser identity profile for authenticated checks")
-    terminal.add_argument("--out", default="results/agent-tools")
+    terminal.add_argument("--out", default=None,
+                          help="Output directory; defaults to a fresh timestamped folder for each run")
 
     inv = s.add_parser("inventory", help="Normalize and deduplicate collected recon data")
     inv.add_argument("result_dir")
@@ -176,7 +189,10 @@ def _main():
         requests = load_execution_json(a.requests) if a.requests else None
         if a.tool and requests is not None:
             raise AgentExecutionInputError("choose --tool or --requests, not both")
-        result = run_agent_terminal(targets, scope, a.out,
+        if a.resume and not a.out:
+            raise AgentExecutionInputError("--resume requires the original --out directory")
+        out_dir = a.out or _fresh_agent_output_dir()
+        result = run_agent_terminal(targets, scope, out_dir,
             authorized=a.authorized, requests=requests, operator_brief=a.operator_brief,
             selected_tools=a.tool,
             local_model=a.local_model, plan_only=a.plan_only, max_rounds=a.rounds, resume=a.resume,
@@ -188,7 +204,7 @@ def _main():
                           "execution_outcome": result.get("execution_outcome"),
                           "traffic_import": result.get("traffic_import") or result.get("plan", {}).get("traffic_import"),
                           "finding_report": result.get("finding_report"),
-                          "out": a.out}, indent=2))
+                          "out": out_dir}, indent=2))
         return 0
     if a.cmd == "policy-agents-run":
         result = run_policy_agents(json.loads(Path(a.manifest).read_text(encoding="utf-8")),
