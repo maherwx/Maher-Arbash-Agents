@@ -12,6 +12,7 @@ graphql = ["graphql-core>=3.2.6,<3.3"]
 
 [project.scripts]
 maher-bounty = "maher_bounty.cli:main"
+maher = "maher_bounty.desktop_ui:main"
 
 [build-system]
 requires = ["setuptools>=68"]

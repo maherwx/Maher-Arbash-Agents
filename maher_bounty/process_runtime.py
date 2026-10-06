@@ -14,7 +14,11 @@ class OutputLimitExceeded(subprocess.TimeoutExpired):
         self.limit = limit
 
 
-def _bounded_communicate(process, cmd, input, timeout, limit, text, job):
+class ProcessCancelled(subprocess.TimeoutExpired):
+    """Caller requested cancellation; the tool process tree was cleaned up."""
+
+
+def _bounded_communicate(process, cmd, input, timeout, limit, text, job, cancel_event=None, truncate_output=False):
     buffers = {"stdout": bytearray(), "stderr": bytearray()}
     exceeded = threading.Event()
     lock = threading.Lock()
@@ -30,7 +34,10 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job):
                     remaining = limit - sum(len(b) for b in buffers.values())
                     buffers[key].extend(chunk[:remaining])
                     if len(chunk) > remaining:
-                        exceeded.set()
+                        if truncate_output:
+                            process._maher_output_truncated = True
+                        else:
+                            exceeded.set()
         except OSError as exc:
             with lock:
                 io_errors.append(exc)
@@ -63,6 +70,9 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job):
     failure = None
     try:
         while True:
+            if cancel_event is not None and cancel_event.is_set():
+                failure = "cancelled"
+                break
             if exceeded.is_set():
                 failure = "output"
                 break
@@ -75,6 +85,14 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job):
     finally:
         if exceeded.is_set() and failure is None:
             failure = "output"
+        if failure == "cancelled" and os.name == "posix":
+            # A desktop CLI worker handles SIGTERM cooperatively so its nested
+            # adapters can clean up their own private process groups first.
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=5)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                pass
         if failure or process.poll() is None or any(t.is_alive() for t in threads):
             _kill_tree(process, job)
         cleanup_deadline = time.monotonic() + 2
@@ -96,6 +114,8 @@ def _bounded_communicate(process, cmd, input, timeout, limit, text, job):
         raise io_error
     if failure == "output":
         raise OutputLimitExceeded(cmd, timeout, limit, output, errors)
+    if failure == "cancelled":
+        raise ProcessCancelled(cmd, timeout, output=output, stderr=errors)
     if failure:
         raise subprocess.TimeoutExpired(cmd, timeout, output=output, stderr=errors)
     return output, errors
@@ -162,7 +182,8 @@ def _kill_tree(process, job=None):
 
 
 def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
-        text=False, timeout=None, check=False, max_output_bytes=8 * 1024 * 1024, env=None):
+        text=False, timeout=None, check=False, max_output_bytes=8 * 1024 * 1024, env=None, cancel_event=None,
+        truncate_output=False):
     if type(max_output_bytes) is not int or max_output_bytes < 1:
         raise ValueError("max_output_bytes must be a positive integer")
     if timeout is not None and (type(timeout) not in (int, float) or not math.isfinite(timeout)):
@@ -180,6 +201,10 @@ def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
         "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
     }
     bounded = stdout == subprocess.PIPE or stderr == subprocess.PIPE
+    if not isinstance(truncate_output, bool) or (truncate_output and not bounded):
+        raise ValueError("output truncation requires captured output and a boolean option")
+    if cancel_event is not None and (not bounded or not isinstance(cancel_event, threading.Event)):
+        raise ValueError("cancellation requires captured output and a threading.Event")
     if bounded and input is not None:
         # Encode on the calling thread before launch; writer-thread failures
         # must not silently turn missing input into a successful tool run.
@@ -191,10 +216,12 @@ def run(cmd, *, input=None, capture_output=False, stdout=None, stderr=None,
         if os.name == "nt":
             job = _WindowsJob(process)
         if bounded:
-            output, errors = _bounded_communicate(process, cmd, input, timeout, max_output_bytes, text, job)
+            output, errors = _bounded_communicate(process, cmd, input, timeout, max_output_bytes, text, job,
+                                                cancel_event, truncate_output)
         else:
             output, errors = process.communicate(input=input, timeout=timeout)
         result = subprocess.CompletedProcess(cmd, process.returncode, output, errors)
+        result.output_truncated = bool(getattr(process, "_maher_output_truncated", False))
         if check:
             result.check_returncode()
         return result

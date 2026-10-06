@@ -49,7 +49,7 @@ def main():
         return 2
 
 
-def _main():
+def build_parser():
     p = argparse.ArgumentParser(prog="maher-bounty")
     s = p.add_subparsers(dest="cmd", required=True)
 
@@ -142,7 +142,16 @@ def _main():
     bench = s.add_parser("workflow-benchmark", help="Evaluate access/state detection against generated local fixtures")
     bench.add_argument("--engine", choices=["http", "browser"], default="http")
     bench.add_argument("--out", default="results/workflow-benchmark")
+    s.add_parser("gui", help="Open the local Maher desktop interface")
+    return p
+
+
+def _main():
+    p = build_parser()
     a = p.parse_args()
+    if a.cmd == "gui":
+        from .desktop_ui import launch_desktop
+        return launch_desktop(build_parser())
     if a.cmd == "agent-tools-run":
         result = run_agent_terminal(load_execution_json(a.targets), load_execution_json(a.scope), a.out,
             authorized=a.authorized, requests=load_execution_json(a.requests) if a.requests else None,
