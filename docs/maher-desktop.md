@@ -30,21 +30,19 @@ example, the agents now include a fixed `sslscan` adapter for in-scope HTTPS
 origins. Its host/port arguments are chosen by the adapter and HTTP targets are
 filtered. Agents still cannot supply arbitrary shell commands or flags.
 
-Direct agent execution offers a single-URL field, four tool profiles, ten common
-adapter choices, and a local-model-only operator brief. Entering a URL is enough;
-that host becomes the scope when no scope file is supplied. The authorization
-checkbox is still required. Explicit adapter choices restrict all rounds to those
-selected fixed adapters; leaving every box empty uses all installed adapters
-allowed by the readiness-aware coordinator.
-The profile and selected adapter set constrain every round, including local
-model proposals. Nmap, ZAP, SSLScan, browser and discovery choices use their
-existing bounded adapters. ZAP Baseline runs directly from the URL when installed.
-Maher does not launch Burp as an automated scanner. PortSwigger documents Burp
-Scanner as a Professional/DAST feature, unavailable in Community Edition, and
-desktop scans start through Burp's scan launcher ([guide](https://portswigger.net/burp/documentation/desktop/getting-started/running-your-first-scan)).
-Existing traffic import remains available through the CLI for saved Burp XML or
-ZAP HAR exports; it only adds in-scope URLs. Authenticated browser checks accept
-the explicit supplied workflow profile, without inventing login or credentials.
+The desktop opens directly on the simple agent scan. Enter one URL, confirm the
+authorization checkbox, and use the prominent **Start URL scan** button above
+the tabs. The guided form does not ask for a scope, proxy export, workflow
+manifest, request packet, tool selection, model file, or output path. The URL's
+host becomes the scope. Maher selects all installed adapters permitted by the
+default `all` profile and skips unavailable adapters; each adapter keeps its
+existing limits. Results use `results/agent-tools`.
+
+This URL flow performs anonymous checks. Authenticated checks need a separately
+supplied identity/workflow configuration; Maher does not infer login steps or
+credentials from a URL. The CLI and dedicated workflow operations retain their
+explicit workflow-manifest interfaces. Burp is not launched as an automated
+scanner by this flow.
 
 The operator brief requires an already configured local GGUF model. It guides
 which permitted checks the local reviewers prioritize and cannot expand scope,
