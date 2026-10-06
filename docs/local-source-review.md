@@ -40,7 +40,14 @@ When `semgrep` is installed, an optional local Community Edition adapter adds
 parser-based sensitive-sink patterns for JavaScript, TypeScript, Java, Kotlin,
 Scala, Go, C#, PHP, Ruby, C, C++, Rust, Swift and Dart. These are fixed
 candidate rules for selected process, query, evaluation, deserialization and
-HTML sinks; they do not provide taint propagation or complete language coverage.
+HTML sinks. They are not complete language coverage. Additional local CE taint
+rules track selected request sources into query, HTML, evaluation, and process
+sinks for JavaScript, TypeScript, Java, and PHP. These generated rules do not use
+registry content or cloud services. Their source/sink models are deliberately
+narrow and have no project-specific sanitizer assumptions, so candidates can be
+false positives and flows through unsupported frameworks, aliases, reflection,
+dynamic dispatch, or multiple files can be missed. CE analysis remains per-file;
+a reported flow is a review lead, not exploit proof.
 Only the bounded source snapshot is staged in a temporary
 directory. Fixed locally generated rules are used with `--oss-only`, metrics off,
 version checks disabled, secret validation disabled and inherited Semgrep settings
