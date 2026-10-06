@@ -113,6 +113,30 @@ Browser package presence remains unverified until the adapter actually launches.
 The summary guides planning; the executor still enforces the selected profile,
 scope admission, per-tool budgets and exact-known-target checks.
 
+Install Arjun locally when the tool readiness panel marks it missing:
+
+```sh
+pipx install arjun
+```
+
+This is the installation method documented by [the official Arjun project](https://github.com/s0md3v/Arjun). Installation is separate from assessment execution.
+
+When `arjun` is installed and selected, the local coordinator can run a bounded
+GET-only parameter-name discovery pass against up to two exact in-scope routes.
+It uses Arjun’s bundled `small` wordlist, one worker, a two-request-per-second
+limit, stable mode, disabled redirects and a 240-second process timeout. It does
+not enable Arjun’s passive-source mode, POST/XML/JSON methods, Burp proxy export,
+or operator-supplied headers. A bounded JSON parser accepts only results whose
+scheme, host, port and path match the exact route Arjun received. Discovered
+names become blank-value query URLs, are scope-checked again, and feed only the
+explicitly selected Dalfox/browser validators for that same route. If those
+validators are selected and available, they can run in the same execution round;
+otherwise the exact parameterized URLs remain recorded as new in-scope evidence
+for later planning. Missing, malformed or absent JSON results are recorded as
+unknown/incomplete parameter extraction, not as proof that no parameters exist.
+This increases route coverage; it does not prove a vulnerability. No target run
+or runtime validation was performed for this change.
+
 Supported adapters include httpx, katana, nuclei, dalfox, ZAP baseline, nmap,
 sslscan, ffuf and the other router tools. sslscan is limited to HTTPS origins
 already in scope and receives a fixed host/port argument; HTTP URLs are filtered.
