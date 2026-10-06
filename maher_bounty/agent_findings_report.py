@@ -58,9 +58,21 @@ def write_agent_findings_report(result, scope, targets, out_dir):
     execution = result["execution"]
     findings = [_entry(value, index, "tool") for index, value in enumerate(execution.get("findings", []), 1)]
     evidence_review = result.get("evidence_review", {})
-    review_by_id = {item["record_id"]: item for item in evidence_review.get("records", [])}
+    review_by_id = {}
+    for item in evidence_review.get("records", []):
+        if isinstance(item, dict) and isinstance(item.get("record_id"), str):
+            review_by_id.setdefault(item["record_id"], []).append(item)
     for entry in findings:
-        entry["evidence_review"] = review_by_id.get(entry["record_id"], {"review_state": "not_reviewed"})
+        reviews = review_by_id.get(entry["record_id"], [])
+        if not reviews:
+            entry["evidence_review"] = {"review_state": "not_reviewed"}
+        elif len(reviews) == 1 and reviews[0].get("record_sha256") == entry["record_sha256"]:
+            entry["evidence_review"] = dict(reviews[0], record_binding="matched")
+        else:
+            entry["evidence_review"] = {
+                "review_state": "unbound_review", "record_binding": "rejected",
+                "impact_confirmed": False,
+                "reasons": ["review ID is duplicated or its hash does not match the original finding"]}
     hypotheses = []
     for review in result.get("model_reviews", []):
         for agent in review.get("agents", []):
@@ -78,7 +90,8 @@ def write_agent_findings_report(result, scope, targets, out_dir):
               "summary": {"tool_finding_records": len(findings), "model_hypothesis_records": len(hypotheses),
                           "unique_exact_tool_records": len(hashes),
                           "verification_counts": dict(Counter(item["verification"] for item in findings)),
-                          "evidence_review_counts": evidence_review.get("counts", {}),
+                          "evidence_review_counts": dict(Counter(
+                              item["evidence_review"].get("review_state", "not_reviewed") for item in findings)),
                           "run_status_counts": result["run_status_counts"],
                           "remaining_deferred_request_count": execution.get("remaining_deferred_request_count", 0),
                           "remaining_native_request_count": execution.get("remaining_native_request_count", 0),
@@ -89,6 +102,8 @@ def write_agent_findings_report(result, scope, targets, out_dir):
               "pending_request_proposals": execution.get("pending_request_proposals", []),
               "limitations": ["all recorded findings preserved, including duplicates and missing metadata",
                               "tool-reported validation is not independent confirmation of exploitability or impact",
+                              "attached evidence reviews require a unique record ID and matching original-record hash",
+                              "record hashes are consistency checks, not signatures or independent validation",
                               "model hypotheses never promoted into tool-confirmed findings",
                               "missing reproduction/impact/remediation details are marked, not invented",
                               "no claim of all vulnerabilities discovered; failed/deferred checks reduce coverage",

@@ -1,5 +1,6 @@
 """Review recorded tool evidence without issuing validation requests."""
 import hashlib
+import json
 import re
 from collections import Counter
 
@@ -67,7 +68,10 @@ def review_agent_evidence(findings, runs, known_urls, scope):
                     reasons = ["browser claim lacks matching complete control/probe records"]
             else:
                 reasons = ["scanner message or validated flag alone is not independent execution proof"]
-        records.append({"record_id": f"tool-{index}", "review_state": state, "reasons": reasons,
+        serialized = json.dumps(finding, sort_keys=True, ensure_ascii=False, allow_nan=False)
+        records.append({"record_id": f"tool-{index}",
+                        "record_sha256": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+                        "review_state": state, "reasons": reasons,
                         "impact_confirmed": False})
     return {"mode": "static_recorded_evidence_review", "records": records,
             "counts": dict(Counter(row["review_state"] for row in records)),
