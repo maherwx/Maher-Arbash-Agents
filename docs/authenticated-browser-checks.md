@@ -17,7 +17,7 @@ to the existing workflow manifest passed with `--workflow-manifest`:
 ```
 
 The manifest must already contain that identity and at least one valid access
-case or workflow. `owner` needs supplied `headers_env` credentials or a private
+case, state case or workflow. `owner` needs supplied `headers_env` credentials or a private
 Playwright `storage_state` file. Environment names and storage paths refer to
 the local machine; no cloud/model API or invented login is used. Chromium and
 the optional browser dependencies must be installed separately. This feature

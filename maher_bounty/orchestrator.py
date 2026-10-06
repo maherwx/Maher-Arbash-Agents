@@ -24,6 +24,7 @@ from .advanced_web_tools import run_advanced_web_tools
 from .workflow_execution import execute_workflows, validate_manifest
 from .browser_xss import load_browser_xss_profile
 from .source_review import review_source
+from .api_contract import review_api_contract
 from .source_correlation import correlate_source_traffic
 from .artifact_io import write_json_atomic
 from .source_check_plan import build_source_check_plan, audit_source_checks
@@ -107,7 +108,7 @@ def active_discovery_enabled(rules: dict, *, authorized: bool) -> bool:
     return bool(authorized) if configured is None else bool(configured)
 
 
-def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None, *, authorized=False, traffic_path=None, workflow_manifest_path=None, source_dir=None):
+def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None, target=None, *, authorized=False, traffic_path=None, workflow_manifest_path=None, source_dir=None, api_contract_path=None):
     if not rules.get("authorization_required", True):
         raise SystemExit("rules.yaml must keep authorization_required=true")
     active_enabled = active_discovery_enabled(rules, authorized=authorized)
@@ -128,12 +129,16 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         workflow_manifest = json.loads(Path(workflow_manifest_path).read_text(encoding="utf-8"))
         validate_manifest(workflow_manifest, scope)
         browser_xss_profile = load_browser_xss_profile(workflow_manifest, scope)
+    api_contract_review = review_api_contract(api_contract_path) if api_contract_path else {"mode": "not_run"}
     imported_traffic = ingest_traffic(traffic_path, kind="auto") if traffic_path else None
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     store = ResearchStore()
     run_id = store.create_run(scope)
     try:
+        if api_contract_path:
+            write_json_atomic(out / "api-contract" / "api-contract-review.json", api_contract_review)
+            store.checkpoint(run_id, "api_contract_review", api_contract_review)
         source_review = review_source(source_dir, out / "source") if source_dir else {"mode": "not_run", "findings": [], "files": []}
         if source_dir:
             store.checkpoint(run_id, "source_review", source_review)
@@ -238,6 +243,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                         "application_intelligence": intelligence, "agent_workstreams": workstreams,
                         "validated_evidence": validation, "native_engine_analysis": native,
                         "source_review": source_review,
+                        "api_contract_review": api_contract_review,
                         "traffic_evidence": traffic_evidence,
                         "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
                         "hypotheses": hypotheses, "prior_agent_evidence": prior_evidence,
@@ -279,6 +285,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                     "traffic_evidence": traffic_evidence, "prior_agent_evidence": evidence_bus(results),
                     "execution_feedback": packet, "research_directives": directives,
                     "source_review": source_review,
+                    "api_contract_review": api_contract_review,
                     "source_check_plan": {key: value for key, value in source_tool_plan.items() if key != "agent_results"},
                     "research_method": {"mode": "execution_round_review", "round": packet["round"],
                                         "can_schedule_next_round": packet["can_schedule_next_round"]},
@@ -357,6 +364,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
                             "application_intelligence": intelligence, "agent_workstreams": workstreams,
                             "validated_evidence": validation, "native_engine_analysis": native,
                             "source_review": source_review,
+                            "api_contract_review": api_contract_review,
                             "source_check_admission_audit": source_tool_audit,
                             "traffic_evidence": traffic_evidence,
                             "active_testing": active_testing, "active_findings": active_testing.get("findings", []),
@@ -399,6 +407,7 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
             "active_testing": active_testing, "burp_traffic_evidence": traffic_evidence,
             "workflow_execution": workflow_execution,
             "source_review": source_review,
+            "api_contract_review": api_contract_review,
             "source_check_plan": {key: value for key, value in source_tool_plan.items() if key != "agent_results"},
             "source_check_admission_audit": source_tool_audit,
             "application_intelligence": intelligence,
@@ -426,13 +435,13 @@ def _run_loaded(scope: dict, rules: dict, out_dir="reports", inventory_path=None
         store.db.close()
 
 
-def run(scope_path, rules_path, out_dir="reports", inventory_path=None, *, authorized=False, traffic_path=None, workflow_manifest_path=None, source_dir=None):
+def run(scope_path, rules_path, out_dir="reports", inventory_path=None, *, authorized=False, traffic_path=None, workflow_manifest_path=None, source_dir=None, api_contract_path=None):
     scope = yaml.safe_load(Path(scope_path).read_text(encoding="utf-8"))
     rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8"))
-    return _run_loaded(scope, rules, out_dir, inventory_path, authorized=authorized, traffic_path=traffic_path, workflow_manifest_path=workflow_manifest_path, source_dir=source_dir)
+    return _run_loaded(scope, rules, out_dir, inventory_path, authorized=authorized, traffic_path=traffic_path, workflow_manifest_path=workflow_manifest_path, source_dir=source_dir, api_contract_path=api_contract_path)
 
 
-def run_target(target: str, rules_path: str | None = None, out_dir="results/auto", *, authorized=False, traffic_path=None, workflow_manifest_path=None, source_dir=None):
+def run_target(target: str, rules_path: str | None = None, out_dir="results/auto", *, authorized=False, traffic_path=None, workflow_manifest_path=None, source_dir=None, api_contract_path=None):
     if not authorized:
         raise SystemExit("auto-run requires --authorized to confirm permission for this target")
     rules = yaml.safe_load(Path(rules_path).read_text(encoding="utf-8")) if rules_path else {
@@ -441,4 +450,4 @@ def run_target(target: str, rules_path: str | None = None, out_dir="results/auto
         "no_persistence": True, "report_evidence": True,
         "allow_active_discovery": True,
     }
-    return _run_loaded({"program": "Authorized target assessment", "assets": [target], "out_of_scope": []}, rules, out_dir, target=target, authorized=True, traffic_path=traffic_path, workflow_manifest_path=workflow_manifest_path, source_dir=source_dir)
+    return _run_loaded({"program": "Authorized target assessment", "assets": [target], "out_of_scope": []}, rules, out_dir, target=target, authorized=True, traffic_path=traffic_path, workflow_manifest_path=workflow_manifest_path, source_dir=source_dir, api_contract_path=api_contract_path)

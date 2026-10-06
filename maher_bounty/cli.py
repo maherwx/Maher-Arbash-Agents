@@ -11,6 +11,7 @@ from .traffic_pipeline import analyze_traffic
 from .workflow_execution import execute_workflows
 from .continuous_service import ContinuousAnalysisService, ServiceConfig, write_status
 from .source_review import review_source
+from .api_contract import review_api_contract, ContractInputError
 
 
 def doctor():
@@ -41,7 +42,7 @@ def _service_config(args):
 def main():
     try:
         return _main()
-    except TrafficInputError as error:
+    except (TrafficInputError, ContractInputError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
@@ -59,6 +60,7 @@ def _main():
     r.add_argument("--authorized", action="store_true", help="Confirm permission for active checks against the supplied scope")
     r.add_argument("--workflow-manifest", default=None, help="JSON manifest of test identities, access policies and workflow invariants")
     r.add_argument("--source-dir", default=None, help="Local application source directory for multilingual static review")
+    r.add_argument("--api-contract", default=None, help="Local OpenAPI 3 JSON contract for bounded API policy review")
 
     auto = s.add_parser("auto-run", help="Collect target inventory and run the full collaborative pipeline")
     auto.add_argument("--target", required=True, help="Authorized website/domain target")
@@ -68,6 +70,11 @@ def _main():
     auto.add_argument("--traffic", default=None, help="Burp XML or HAR export to scope-filter and share with agents")
     auto.add_argument("--workflow-manifest", default=None, help="Execute authenticated access policies and workflow invariants")
     auto.add_argument("--source-dir", default=None, help="Local application source directory for multilingual static review")
+    auto.add_argument("--api-contract", default=None, help="Local OpenAPI 3 JSON contract")
+
+    contract = s.add_parser("api-contract-review", help="Review local OpenAPI operations and declared authorization without network requests")
+    contract.add_argument("path", help="Local OpenAPI 3.0/3.1 JSON")
+    contract.add_argument("--out", default="results/api-contract")
 
     source = s.add_parser("source-review", help="Review multilingual local source using native checks and optional local Semgrep CE")
     source.add_argument("--source-dir", required=True)
@@ -118,6 +125,11 @@ def _main():
     bench.add_argument("--engine", choices=["http", "browser"], default="http")
     bench.add_argument("--out", default="results/workflow-benchmark")
     a = p.parse_args()
+    if a.cmd == "api-contract-review":
+        result = review_api_contract(a.path, a.out)
+        print(json.dumps({"status": result["status"], "operations": result["operation_count"],
+                          "coverage_gaps": result["coverage_gaps"], "out": a.out}, indent=2))
+        return
 
     if a.cmd == "workflow-benchmark":
         from .workflow_benchmark import run_workflow_benchmark
@@ -174,6 +186,7 @@ def _main():
             **({"traffic_path": a.traffic} if a.traffic else {}),
             **({"workflow_manifest_path": a.workflow_manifest} if a.workflow_manifest else {}),
             **({"source_dir": a.source_dir} if a.source_dir else {}),
+            **({"api_contract_path": a.api_contract} if a.api_contract else {}),
         )
         active = result.get("active_testing", {})
         status = active.get("status", "completed" if active else "skipped")
@@ -197,6 +210,7 @@ def _main():
             **({"traffic_path": a.traffic} if a.traffic else {}),
             **({"workflow_manifest_path": a.workflow_manifest} if a.workflow_manifest else {}),
             **({"source_dir": a.source_dir} if a.source_dir else {}),
+            **({"api_contract_path": a.api_contract} if a.api_contract else {}),
         )
         active = result.get("active_testing", {})
         validation = result.get("validated_evidence", {}).get("counts", {})
