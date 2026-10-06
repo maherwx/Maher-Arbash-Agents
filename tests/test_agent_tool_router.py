@@ -7,6 +7,17 @@ from maher_bounty.agent_tool_router import _prior_coverage, build_local_tool_req
 
 
 class AgentToolRouterTests(unittest.TestCase):
+    def test_local_coordinator_only_plans_locally_available_adapters_when_supplied(self):
+        root = "https://app.example.test/"
+        query = root + "search?q=blue"
+        plan = build_local_tool_requests(
+            [root, query], scope={"assets": [root], "out_of_scope": []},
+            enabled_tools={"katana", "nuclei", "dalfox", "ffuf", "gobuster"},
+            available_tools={"katana"},
+        )
+        requests = [item for result in plan["agent_results"] for item in result["tool_requests"]]
+        self.assertEqual({item["tool"] for item in requests}, {"katana"})
+
     def test_local_coordinator_selects_uncovered_tools_without_a_model(self):
         root = "https://app.example.test/"
         query = "https://app.example.test/search?q=blue"

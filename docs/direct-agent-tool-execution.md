@@ -65,9 +65,11 @@ checks `PATH` and Playwright package metadata; it does not run tools or verify
 that a browser can launch. Local model reviewers receive this prerequisite
 summary with PATH-present executables separated from installed-but-unverified
 browser prerequisites. They are instructed to prefer PATH-present adapters.
-The summary is advisory; the
-executor still enforces the selected profile, scope admission, per-tool budgets
-and exact-known-target checks.
+The native planner omits adapters known missing at preflight, and model requests
+for those adapters are recorded as rejected without a futile process launch.
+Browser package presence remains unverified until the adapter actually launches.
+The summary guides planning; the executor still enforces the selected profile,
+scope admission, per-tool budgets and exact-known-target checks.
 
 Supported adapters include httpx, katana, nuclei, dalfox, ZAP baseline, nmap,
 sslscan, ffuf and the other router tools. sslscan is limited to HTTPS origins

@@ -115,6 +115,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
     allowed_tools = set(AGENT_TOOL_PROFILES[tool_profile])
     readiness = tool_readiness_snapshot()
     availability_context = agent_tool_availability_context(readiness, allowed_tools, tool_profile)
+    available_tools = {row["tool"] for row in readiness["tools"] if row.get("available") is True}
     roles = [
         {"id": "web_surface_reviewer", "mission": "Plan complementary scoped local tool checks from observed web evidence."},
         {"id": "evidence_reviewer", "mission": "Review actual execution failures and findings; distinguish candidates from proof."},
@@ -137,7 +138,8 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         reviews.append({"round": packet["round"], "agents": outputs})
         return outputs
 
-    native = build_local_tool_requests(known, scope=scope, enabled_tools=allowed_tools)
+    native = build_local_tool_requests(known, scope=scope, enabled_tools=allowed_tools,
+                                       available_tools=available_tools)
     packets = list(requests) if requests is not None else list(native["agent_results"])
     if model is not None:
         packets = [*analyze({"round": 0, "known_urls": known, "runs": [], "findings": [],
@@ -163,7 +165,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
             checkpoint_path=checkpoint, resume=resume,
             checkpoint_context={"mode": plan["mode"], "initial_requests": packets,
                                 "tool_profile": tool_profile, "selected_tools": sorted(allowed_tools)},
-            allowed_tools=allowed_tools)
+            allowed_tools=allowed_tools, available_tools=available_tools)
     except ValueError:
         if not resume:
             raise

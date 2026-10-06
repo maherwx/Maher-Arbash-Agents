@@ -224,6 +224,7 @@ def build_local_tool_requests(
     tool_plan: dict | None = None,
     browser_xss_profile: dict | None = None,
     enabled_tools: set[str] | None = None,
+    available_tools: set[str] | None = None,
 ) -> dict:
     """Build a no-model local follow-up plan from evidence and actual coverage.
 
@@ -268,8 +269,12 @@ def build_local_tool_requests(
         "gau": origin_urls,
     }
     enabled_tools = DIRECT_AGENT_TOOLS if enabled_tools is None else set(enabled_tools) & DIRECT_AGENT_TOOLS
+    available_tools = None if available_tools is None else set(available_tools)
     # Choose one content-discovery engine to avoid duplicate wordlist traffic.
-    dir_tool = "ffuf" if shutil.which("ffuf") else "gobuster"
+    if available_tools is None:
+        dir_tool = "ffuf" if shutil.which("ffuf") else "gobuster"
+    else:
+        dir_tool = "ffuf" if "ffuf" in available_tools else "gobuster" if "gobuster" in available_tools else None
     if dir_tool in enabled_tools:
         candidates_by_tool[dir_tool] = [
             url for url in origin_urls
@@ -284,7 +289,7 @@ def build_local_tool_requests(
         "whatweb", "wafw00f", "nikto", "nmap", "httpx",
         "subfinder", "assetfinder", "waybackurls", "gau",
     ):
-        if tool not in enabled_tools:
+        if tool not in enabled_tools or (available_tools is not None and tool not in available_tools):
             continue
         if tool not in candidates_by_tool or len(requests) >= MAX_AGENT_REQUESTS:
             continue

@@ -57,6 +57,17 @@ class AgentFeedbackTests(unittest.TestCase):
         self.assertEqual(execute.call_count, 1)
         self.assertFalse(result["new_in_scope_urls"])
 
+    def test_unavailable_agent_tool_is_recorded_without_process_launch(self):
+        with tempfile.TemporaryDirectory() as td, \
+             patch("maher_bounty.agent_feedback.run_agent_tool_requests") as execute:
+            result = run_agent_tool_feedback(
+                self.request("nuclei", [self.origin]), [self.origin], td,
+                scope={"assets": [self.origin]}, available_tools={"katana"},
+            )
+        execute.assert_not_called()
+        self.assertTrue(any(row.get("reason") == "tool_unavailable_at_preflight"
+                            for row in result["decisions"]))
+
     def test_global_route_admission_budget(self):
         fresh = [self.origin + str(i) for i in range(40)]
         with tempfile.TemporaryDirectory() as td, patch("maher_bounty.agent_feedback.run_agent_tool_requests", return_value={
