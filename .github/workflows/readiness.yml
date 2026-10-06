@@ -28,6 +28,7 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: |
           python -m unittest discover -s tests -p test_browser_runtime.py -v
+          python -m unittest discover -s tests -p test_browser_xss.py -v
           python -m unittest discover -s tests -p test_multi_identity_workflows.py -v
           python -m unittest discover -s tests -p test_local_proxy.py -v
           python -m unittest discover -s tests -p test_workflow_benchmark_live.py -v

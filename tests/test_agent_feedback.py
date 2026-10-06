@@ -87,3 +87,35 @@ class AgentFeedbackTests(unittest.TestCase):
         for value in [True, 0, 4, 1.5]:
             with self.assertRaises(ValueError):
                 run_agent_tool_feedback([], [], ".", scope={}, max_rounds=value)
+
+    def test_reference_only_request_reaches_real_router(self):
+        rows = [{"agent": "traffic-reviewer", "tool_requests": [{"tool": "whatweb", "target_refs": "burp-1"}]}]
+        with tempfile.TemporaryDirectory() as td, \
+             patch("maher_bounty.agent_tool_router.shutil.which", return_value="local-tool"), \
+             patch("maher_bounty.agent_tool_router._exec", return_value={"tool": "whatweb", "status": "ok"}) as execute:
+            result = run_agent_tool_feedback(rows, [self.origin], td, scope={"assets": [self.origin]},
+                                             target_references={"burp-1": self.origin})
+        execute.assert_called_once()
+        self.assertIn(self.origin, execute.call_args.args[0])
+        self.assertEqual(len(result["runs"]), 1)
+
+    def test_references_do_not_bypass_known_inventory_or_scope(self):
+        for target in [self.origin + "unknown", "https://outside.example/"]:
+            rows = [{"tool_requests": [{"tool": "whatweb", "target_refs": ["ref"]}]}]
+            with tempfile.TemporaryDirectory() as td, patch("maher_bounty.agent_tool_router._exec") as execute:
+                run_agent_tool_feedback(rows, [self.origin], td, scope={"assets": [self.origin]},
+                                        target_references={"ref": target})
+            execute.assert_not_called()
+
+    def test_alias_and_reference_share_attempt_key(self):
+        rows = [{"tool_requests": [{"tool": "zap", "targets": self.origin},
+                                    {"tool": "zap-baseline.py", "target_refs": ["ref", "missing"]}]}]
+        with tempfile.TemporaryDirectory() as td, patch("maher_bounty.agent_feedback.run_agent_tool_requests",
+                return_value={"runs": [], "findings": [], "new_in_scope_urls": []}) as execute:
+            result = run_agent_tool_feedback(rows, [self.origin], td, scope={"assets": [self.origin]},
+                                             target_references={"ref": self.origin})
+        sent = execute.call_args.args[0][0]["tool_requests"]
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["tool"], "zap-baseline.py")
+        self.assertEqual(sent[0]["targets"], [self.origin])
+        self.assertEqual(result["decisions"][0]["unknown_target_ref_count"], 1)

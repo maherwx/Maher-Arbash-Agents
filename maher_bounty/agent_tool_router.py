@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 from pathlib import Path
 from urllib.parse import urlparse
@@ -8,11 +9,13 @@ from urllib.parse import urlparse
 from .active_testing import _dalfox_findings, _directory_discovery, _exec, _nuclei_findings
 from .scope_policy import filter_in_scope_urls
 from .zap_cli import run_zap_baseline
+from .browser_xss import run_browser_xss
 
 
 # Agents choose from fixed local tools. Requests never contain shell commands,
 # executable paths, arbitrary flags, payloads, or new target hosts.
 SUPPORTED_AGENT_TOOLS = {
+    "browser-xss",
     "hakrawler", "katana", "httpx", "nuclei", "dalfox", "zap-baseline.py",
     "nikto", "nmap", "tlsx", "whatweb", "wafw00f", "dnsx", "naabu", "ffuf", "gobuster",
     "subfinder", "assetfinder", "waybackurls", "gau", "alterx",
@@ -74,7 +77,7 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
     ]
     # Failed, blocked, missing, and timed-out runs count as attempts too.
     # A later run can retry after the recorded cause is fixed.
-    attempted_statuses = {"ok", "nonzero", "timeout", "blocked", "missing"}
+    attempted_statuses = {"ok", "nonzero", "timeout", "blocked", "missing", "partial"}
     for run in run_rows:
         if not isinstance(run, dict) or run.get("status") not in attempted_statuses:
             continue
@@ -85,6 +88,9 @@ def _prior_coverage(active_testing: dict, known: set[str], tool_plan: dict | Non
         if not isinstance(command, list):
             command = []
         targets = set()
+        if tool == "browser-xss":
+            covered[tool].update(url for url in known if hashlib.sha256(url.encode()).hexdigest() == run.get("target_sha256"))
+            continue
         if tool == "nuclei":
             targets.update(_read_target_file(command, "-l"))
         elif tool == "httpx":
@@ -156,6 +162,7 @@ def build_local_tool_requests(
             origin_urls.append(url)
 
     candidates_by_tool = {
+        "browser-xss": [url for url in allowed if urlparse(url).query],
         "nuclei": allowed,
         "dalfox": [url for url in allowed if urlparse(url).query],
         "katana": origin_urls,
@@ -185,7 +192,7 @@ def build_local_tool_requests(
     requests = []
     selected_targets = set()
     for tool in (
-        "nuclei", "dalfox", "katana", "hakrawler", "zap-baseline.py",
+        "nuclei", "dalfox", "browser-xss", "katana", "hakrawler", "zap-baseline.py",
         "naabu", "dnsx", "alterx", "tlsx", "ffuf", "gobuster",
         "whatweb", "wafw00f", "nikto", "nmap", "httpx",
         "subfinder", "assetfinder", "waybackurls", "gau",
@@ -285,7 +292,7 @@ def run_agent_tool_requests(
             if url not in known:
                 continue
             parsed = urlparse(url)
-            if tool == "dalfox" and not parsed.query:
+            if tool in {"dalfox", "browser-xss"} and not parsed.query:
                 continue
             if tool == "tlsx" and parsed.scheme.lower() != "https":
                 continue
@@ -320,6 +327,11 @@ def run_agent_tool_requests(
 
     runs, findings = [], []
     new_crawl_urls = []
+    for index, scan_url in enumerate(selected["browser-xss"][:MAX_FOLLOWUP_ORIGINS], start=1):
+        check = run_browser_xss(scan_url, root / f"browser-xss-{index}", scope=scope, authorized=True)
+        findings.extend(check.get("findings", []))
+        runs.append({key: value for key, value in check.items() if key != "findings"} | {
+            "target_sha256": hashlib.sha256(scan_url.encode()).hexdigest()})
 
     # Agents can request deeper, complementary passes from the installed local
     # web toolkit. Each command is selected from fixed argv templates.

@@ -20,6 +20,12 @@ round; identities and credentials are never invented. Tool commands still use
 the existing structured allowlist and validated known targets. The pipeline
 does not interpret model output as arbitrary shell commands.
 
+Requests can use `target_refs` from scoped traffic evidence, including a single
+reference string. References resolve before attempt deduplication and still
+require known, in-scope URLs. Unknown references produce a filtered decision.
+Single-string `targets` and ZAP aliases retain the router's supported behavior;
+aliases and references to the same target share one attempt key.
+
 No model service or cloud is required for this coordination. Without a local
 model, it is deterministic feedback based on observed routes and coverage,
 not autonomous language-model reasoning. This change does not implement

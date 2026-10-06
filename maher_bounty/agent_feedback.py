@@ -30,20 +30,37 @@ def run_agent_tool_feedback(results, known_urls, out_dir, *, scope, active_testi
                     continue
                 tool = request.get("tool", "")
                 targets = request.get("targets", [])
-                if not isinstance(tool, str) or not isinstance(targets, list):
+                if not isinstance(tool, str):
                     continue
                 tool = tool.strip().lower()
+                if tool in {"zap", "zaproxy", "zap.sh"}:
+                    tool = "zap-baseline.py"
+                targets = [targets] if isinstance(targets, str) else list(targets) if isinstance(targets, list) else []
+                refs = request.get("target_refs", [])
+                refs = [refs] if isinstance(refs, str) else refs if isinstance(refs, list) else []
+                unknown = 0
+                for ref in refs:
+                    if not isinstance(ref, str):
+                        continue
+                    resolved = (target_references or {}).get(ref)
+                    if isinstance(resolved, str) and resolved:
+                        targets.append(resolved)
+                    else:
+                        unknown += 1
+                if unknown:
+                    aggregate["decisions"].append({"agent": row.get("agent"), "tool": tool,
+                                                   "status": "filtered", "unknown_target_ref_count": unknown})
                 fresh_targets = []
                 for target in targets:
                     if not isinstance(target, str):
                         continue
-                    resolved = (target_references or {}).get(target, target)
-                    key = (tool, _coverage_key(tool, resolved))
+                    key = (tool, _coverage_key(tool, target))
                     if key not in attempted:
                         attempted.add(key)
                         fresh_targets.append(target)
                 if fresh_targets:
-                    requests.append({**request, "targets": fresh_targets})
+                    # References are resolved once before attempt deduplication.
+                    requests.append({**request, "tool": tool, "targets": fresh_targets, "target_refs": []})
             if requests:
                 submitted.append({**row, "tool_requests": requests})
         if not submitted:
