@@ -13,12 +13,17 @@ PATTERNS = {
     "javascript": ["eval($X)", "$OBJ.innerHTML = $X", "child_process.exec($X, ...)"],
     "typescript": ["eval($X)", "$OBJ.innerHTML = $X", "child_process.exec($X, ...)"],
     "java": ["Runtime.getRuntime().exec($X)", "$STMT.executeQuery($X)"],
+    "kotlin": ["Runtime.getRuntime().exec($X)", "$STMT.executeQuery($X)"],
+    "scala": ["Runtime.getRuntime().exec($X)", "$STMT.executeQuery($X)"],
     "go": ['exec.Command("sh", "-c", $X, ...)'],
+    "csharp": ["Process.Start($X)", "new ProcessStartInfo($X, ...)", "$CMD.CommandText = $X"],
     "php": ["eval($X)", "unserialize($X)", "shell_exec($X)"],
     "ruby": ["eval($X)", "system($X)", "Marshal.load($X)"],
     "c": ["system($X)", "strcpy($DST, $SRC)", "gets($DST)"],
     "cpp": ["system($X)", "strcpy($DST, $SRC)"],
     "rust": ['Command::new("sh").arg("-c").arg($X)'],
+    "swift": ["$PROCESS.executableURL = $X", "$WEB.loadHTMLString($X, baseURL: ...)"],
+    "dart": ["Process.run($CMD, ...)", "Process.start($CMD, ...)"],
 }
 
 

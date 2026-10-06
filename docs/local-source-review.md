@@ -37,8 +37,11 @@ Summaries merge call contexts conservatively; branches and sanitizer correctness
 remain unproven. The existing propagation work limit covers all four passes.
 
 When `semgrep` is installed, an optional local Community Edition adapter adds
-parser-based sensitive-sink patterns for JavaScript, TypeScript, Java, Go, PHP,
-Ruby, C, C++ and Rust. Only the bounded source snapshot is staged in a temporary
+parser-based sensitive-sink patterns for JavaScript, TypeScript, Java, Kotlin,
+Scala, Go, C#, PHP, Ruby, C, C++, Rust, Swift and Dart. These are fixed
+candidate rules for selected process, query, evaluation, deserialization and
+HTML sinks; they do not provide taint propagation or complete language coverage.
+Only the bounded source snapshot is staged in a temporary
 directory. Fixed locally generated rules are used with `--oss-only`, metrics off,
 version checks disabled, secret validation disabled and inherited Semgrep settings
 removed from the subprocess environment. There is no registry config, login,

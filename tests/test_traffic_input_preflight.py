@@ -49,3 +49,17 @@ class TrafficInputPreflightTests(unittest.TestCase):
                 path = Path(td) / name
                 path.write_text(content)
                 self.assertEqual(ingest_traffic(path), [])
+
+    def test_burp_base64_must_be_valid_but_wrapped_whitespace_is_allowed(self):
+        with tempfile.TemporaryDirectory() as td:
+            invalid = Path(td) / "invalid.xml"
+            invalid.write_text('<items><item><request base64="true">%%%secret</request></item></items>')
+            with self.assertRaises(TrafficInputError) as error:
+                ingest_traffic(invalid)
+            self.assertNotIn("secret", str(error.exception))
+
+            wrapped = Path(td) / "wrapped.xml"
+            wrapped.write_text('<items><item><url>https://example.test/</url><request base64="true">R0VUIC8gSFRUUC8xLjENCg==\n</request></item></items>')
+            records = ingest_traffic(wrapped)
+            self.assertEqual(len(records), 1)
+            self.assertIn("GET / HTTP/1.1", records[0]["request_raw"])

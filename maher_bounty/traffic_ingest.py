@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import re
@@ -54,9 +55,14 @@ def _decode(value: str | None, encoded: bool = False) -> str:
         return ""
     if encoded:
         try:
-            return base64.b64decode(value).decode("utf-8", errors="replace")
-        except Exception:
-            return value
+            # Burp wraps base64 XML text in some exports. Permit whitespace,
+            # but reject any other invalid alphabet/padding instead of silently
+            # treating the encoded text as an HTTP message.
+            compact = re.sub(rb"\s+", b"", value.encode("ascii"))
+            decoded = base64.b64decode(compact, validate=True)
+        except (ValueError, UnicodeError, binascii.Error):
+            raise ValueError("Burp XML message contains invalid base64") from None
+        return decoded.decode("utf-8", errors="replace")
     return value
 
 
