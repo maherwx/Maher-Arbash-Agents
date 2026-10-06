@@ -98,7 +98,7 @@ def build_parser():
     terminal = s.add_parser("agent-tools-run", help="Plan, execute and review scoped local tools directly without recon setup")
     terminal.add_argument("--targets", help="Local JSON array of exact authorized URLs")
     terminal.add_argument("--target", help="One exact authorized HTTP/HTTPS URL")
-    terminal.add_argument("--scope", required=True)
+    terminal.add_argument("--scope", help="Optional local scope JSON; without it, --target host is the scope")
     terminal.add_argument("--requests", help="Optional local JSON worker tool-request packets")
     terminal.add_argument("--tool", action="append", choices=sorted(SUPPORTED_AGENT_TOOLS),
                           help="Run this fixed adapter against supplied URLs; repeat to select several")
@@ -166,10 +166,17 @@ def _main():
         if bool(a.targets) == bool(a.target):
             raise AgentExecutionInputError("provide exactly one of --target or --targets")
         targets = [a.target] if a.target else load_execution_json(a.targets)
+        if a.scope:
+            scope = load_execution_json(a.scope)
+        elif a.target:
+            # The explicitly supplied single URL provides the default host scope.
+            scope = {"assets": [a.target], "out_of_scope": []}
+        else:
+            raise AgentExecutionInputError("--scope is required when using --targets")
         requests = load_execution_json(a.requests) if a.requests else None
         if a.tool and requests is not None:
             raise AgentExecutionInputError("choose --tool or --requests, not both")
-        result = run_agent_terminal(targets, load_execution_json(a.scope), a.out,
+        result = run_agent_terminal(targets, scope, a.out,
             authorized=a.authorized, requests=requests, operator_brief=a.operator_brief,
             selected_tools=a.tool,
             local_model=a.local_model, plan_only=a.plan_only, max_rounds=a.rounds, resume=a.resume,
