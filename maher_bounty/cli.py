@@ -13,6 +13,7 @@ from .continuous_service import ContinuousAnalysisService, ServiceConfig, write_
 from .source_review import review_source
 from .api_contract import review_api_contract, ContractInputError
 from .policy_agents import run_policy_agents
+from .agent_terminal import run_agent_terminal, load_execution_json, AgentExecutionInputError
 
 
 def doctor():
@@ -43,7 +44,7 @@ def _service_config(args):
 def main():
     try:
         return _main()
-    except (TrafficInputError, ContractInputError) as error:
+    except (TrafficInputError, ContractInputError, AgentExecutionInputError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
@@ -93,6 +94,16 @@ def _main():
     policy.add_argument("--authorized", action="store_true")
     policy.add_argument("--out", default="results/policy-agents")
 
+    terminal = s.add_parser("agent-tools-run", help="Plan, execute and review scoped local tools directly without recon setup")
+    terminal.add_argument("--targets", required=True, help="Local JSON array of exact authorized URLs")
+    terminal.add_argument("--scope", required=True)
+    terminal.add_argument("--requests", help="Optional local JSON worker tool-request packets")
+    terminal.add_argument("--authorized", action="store_true")
+    terminal.add_argument("--local-model", action="store_true", help="Require configured in-process GGUF reasoning")
+    terminal.add_argument("--plan-only", action="store_true", help="Write plan without launching target tools")
+    terminal.add_argument("--rounds", type=int, choices=[1, 2, 3], default=3)
+    terminal.add_argument("--out", default="results/agent-tools")
+
     inv = s.add_parser("inventory", help="Normalize and deduplicate collected recon data")
     inv.add_argument("result_dir")
 
@@ -132,6 +143,13 @@ def _main():
     bench.add_argument("--engine", choices=["http", "browser"], default="http")
     bench.add_argument("--out", default="results/workflow-benchmark")
     a = p.parse_args()
+    if a.cmd == "agent-tools-run":
+        result = run_agent_terminal(load_execution_json(a.targets), load_execution_json(a.scope), a.out,
+            authorized=a.authorized, requests=load_execution_json(a.requests) if a.requests else None,
+            local_model=a.local_model, plan_only=a.plan_only, max_rounds=a.rounds)
+        print(json.dumps({"status": result["status"], "run_status_counts": result.get("run_status_counts", {}),
+                          "out": a.out}, indent=2))
+        return 0
     if a.cmd == "policy-agents-run":
         result = run_policy_agents(json.loads(Path(a.manifest).read_text(encoding="utf-8")),
                                    json.loads(Path(a.scope).read_text(encoding="utf-8")), a.out,
