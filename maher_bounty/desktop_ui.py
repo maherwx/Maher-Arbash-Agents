@@ -46,11 +46,16 @@ OPERATION_DESCRIPTIONS = {
     "doctor": "\u064a\u0639\u0631\u0636 \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u062b\u0628\u062a\u0629 \u0648\u0627\u0644\u0645\u062a\u0627\u062d\u0629.",
     "workflow-benchmark": "\u064a\u0634\u063a\u0651\u0644 \u0642\u064a\u0627\u0633\u064b\u0627 \u0645\u062d\u0644\u064a\u064b\u0627 \u0628\u062d\u0627\u0644\u0627\u062a \u0627\u062e\u062a\u0628\u0627\u0631 \u0645\u0648\u0644\u0651\u062f\u0629.",
 }
+OPERATION_DESCRIPTIONS["agent-tools-run"] = (
+    "\u0623\u062f\u062e\u0644 \u0631\u0627\u0628\u0637\u064b\u0627 \u0636\u0645\u0646 \u0627\u0644\u0646\u0637\u0627\u0642\u060c \u0648\u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0627\u0644\u062a\u064a \u062a\u0631\u064a\u062f \u062a\u0634\u063a\u064a\u0644\u0647\u0627 \u0645\u0646 \u0627\u0644\u0642\u0627\u0626\u0645\u0629. \u0627\u062e\u062a\u0631 \u0645\u0646 \u0639\u0634\u0631\u0629 \u0645\u062d\u0648\u0651\u0644\u0627\u062a \u062b\u0627\u0628\u062a\u0629. "
+    "\u0627\u0633\u062a\u064a\u0631\u0627\u062f Burp/ZAP \u064a\u0636\u064a\u0641 \u0627\u0644\u0631\u0648\u0627\u0628\u0637 \u0627\u0644\u0645\u0637\u0627\u0628\u0642\u0629 \u0644\u0644\u0646\u0637\u0627\u0642 \u0641\u0642\u0637 \u0648\u0644\u0627 \u064a\u0634\u063a\u0651\u0644 \u0627\u0644\u062a\u0637\u0628\u064a\u0642\u064a\u0646. "
+    "\u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0643 \u062a\u062d\u062a\u0627\u062c \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u062d\u0644\u064a\u064b\u0627\u060c \u0648\u062a\u0628\u0642\u0649 \u0645\u0642\u064a\u062f\u0629 \u0628\u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0648\u0627\u0644\u0642\u0648\u0627\u0644\u0628 \u0648\u0627\u0644\u0646\u0637\u0627\u0642."
+)
 FIELD_LABELS = {
     "target": "\u0631\u0627\u0628\u0637 \u0627\u0644\u0645\u0648\u0642\u0639 \u0627\u0644\u0645\u0635\u0631\u0651\u062d", "targets": "\u0645\u0644\u0641 \u0631\u0648\u0627\u0628\u0637 \u0627\u0644\u0623\u0647\u062f\u0627\u0641",
     "scope": "\u0645\u0644\u0641 \u0627\u0644\u0646\u0637\u0627\u0642 \u0627\u0644\u0645\u0633\u0645\u0648\u062d", "rules": "\u0645\u0644\u0641 \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0641\u062d\u0635",
     "authorized": "\u0644\u062f\u064a \u0625\u0630\u0646 \u0644\u0641\u062d\u0635 \u0647\u0630\u0627 \u0627\u0644\u0646\u0637\u0627\u0642",
-    "traffic": "\u0645\u0644\u0641 \u062d\u0631\u0643\u0629 Burp/HAR \u0645\u0648\u062c\u0648\u062f", "workflow_manifest": "\u0645\u0644\u0641 \u062e\u0637\u0648\u0627\u062a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631",
+    "traffic": "\u0645\u0644\u0641 \u062a\u0635\u062f\u064a\u0631 Burp/ZAP", "workflow_manifest": "\u0645\u0644\u0641 \u062e\u0637\u0648\u0627\u062a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631",
     "manifest": "\u0645\u0644\u0641 \u062d\u0627\u0644\u0627\u062a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631", "source_dir": "\u0645\u062c\u0644\u062f \u0627\u0644\u0643\u0648\u062f \u0627\u0644\u0645\u062d\u0644\u064a",
     "api_contract": "\u0645\u0644\u0641 OpenAPI \u0645\u062d\u0644\u064a", "out": "\u0645\u0643\u0627\u0646 \u062d\u0641\u0638 \u0627\u0644\u0646\u062a\u0627\u0626\u062c",
     "rounds": "\u0623\u0642\u0635\u0649 \u0639\u062f\u062f \u0644\u0644\u062c\u0648\u0644\u0627\u062a", "requests": "\u0645\u0644\u0641 \u0637\u0644\u0628\u0627\u062a \u0623\u062f\u0648\u0627\u062a \u0627\u062e\u062a\u064a\u0627\u0631\u064a",
@@ -59,14 +64,15 @@ FIELD_LABELS = {
     "resume": "\u0627\u0633\u062a\u0626\u0646\u0627\u0641 \u062a\u0646\u0641\u064a\u0630 \u0645\u062d\u0641\u0648\u0638 \u0645\u0637\u0627\u0628\u0642",
 }
 FIELD_HELP = {
+    "target": "\u0623\u062f\u062e\u0644 \u0631\u0627\u0628\u0637 HTTP/HTTPS \u0648\u0627\u062d\u062f\u064b\u0627 \u0636\u0645\u0646 \u0645\u0644\u0641 \u0627\u0644\u0646\u0637\u0627\u0642. \u0644\u062a\u0634\u063a\u064a\u0644 \u0639\u062f\u0629 \u0631\u0648\u0627\u0628\u0637\u060c \u0627\u0633\u062a\u062e\u062f\u0645 --targets \u0645\u0646 CLI.",
     "scope": "\u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0646\u0637\u0627\u0642 \u062a\u062d\u062f\u062f \u0645\u0627 \u064a\u0633\u0645\u062d \u0644\u0644\u0648\u0643\u0644\u0627\u0621 \u0628\u0641\u062d\u0635\u0647.",
     "authorized": "\u064a\u062c\u0628 \u0645\u0644\u0643\u064a\u0629 \u0627\u0644\u0647\u062f\u0641 \u0623\u0648 \u0648\u062c\u0648\u062f \u0625\u0630\u0646 \u0648\u0627\u0636\u062d \u0642\u0628\u0644 \u0627\u0644\u062a\u0646\u0641\u064a\u0630.",
-    "traffic": "\u0645\u0644\u0641 \u0635\u062f\u0651\u0631\u062a\u0647 \u0645\u0633\u0628\u0642\u064b\u0627 \u0645\u0646 Burp \u0623\u0648 ZAP. \u0644\u0627 \u062a\u0643\u062a\u0628 \u0645\u0633\u0627\u0631\u064b\u0627 \u0648\u0647\u0645\u064a\u064b\u0627.",
+    "traffic": "\u0627\u062e\u062a\u0631 Burp XML \u0623\u0648 HAR \u0645\u0635\u062f\u0651\u0631\u064b\u0627 \u0645\u0646 ZAP. \u062a\u064f\u0633\u062a\u062e\u062f\u0645 \u0631\u0648\u0627\u0628\u0637 \u0645\u0639\u0631\u0648\u0641\u0629 \u0648\u0645\u0637\u0627\u0628\u0642\u0629 \u0644\u0644\u0646\u0637\u0627\u0642\u060c \u0648\u0644\u0627 \u064a\u064f\u0634\u063a\u0651\u0644 Burp \u0623\u0648 ZAP \u0645\u0646 \u0627\u0644\u0636\u0648\u0627\u0628\u0637.",
     "workflow_manifest": "\u0645\u0644\u0641 JSON \u064a\u0635\u0641 \u0627\u0644\u0647\u0648\u064a\u0627\u062a \u0648\u062e\u0637\u0648\u0627\u062a \u0627\u0644\u0641\u062d\u0635 \u0627\u0644\u0645\u0635\u0631\u0651\u062d\u0629.",
     "api_contract": "\u0645\u0644\u0641 OpenAPI \u0645\u062d\u0644\u064a \u0644\u0645\u0631\u0627\u062c\u0639\u0629 \u0639\u0642\u062f API.",
     "source_dir": "\u0645\u062c\u0644\u062f \u0645\u0635\u062f\u0631 \u0645\u062d\u0644\u064a \u0644\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0643\u0648\u062f.",
-    "requests": "\u0627\u062e\u062a\u064a\u0627\u0631\u064a: \u062a\u0639\u0631\u064a\u0641 \u0623\u062f\u0648\u0627\u062a \u0645\u062d\u062f\u062f\u0629. \u0645\u0644\u0641 \u0627\u0644\u0646\u0637\u0627\u0642 \u064a\u0628\u0642\u0649 \u0627\u0644\u0645\u0631\u062c\u0639.",
-    "local_model": "\u064a\u0633\u062a\u062e\u062f\u0645 \u0641\u0642\u0637 \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u0648\u062c\u0648\u062f \u0639\u0644\u0649 \u062c\u0647\u0627\u0632\u0643.",
+    "requests": "\u0628\u062f\u064a\u0644 \u0644\u0627\u062e\u062a\u064a\u0627\u0631 \u0627\u0644\u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0641\u064a \u0627\u0644\u0642\u0627\u0626\u0645\u0629. \u0627\u062e\u062a\u0631 \u0637\u0631\u064a\u0642\u0629 \u0648\u0627\u062d\u062f\u0629; \u0648\u0627\u062a\u0631\u0643\u0647 \u0641\u0627\u0631\u063a\u064b\u0627 \u0644\u0644\u062e\u0637\u0629 \u0627\u0644\u0645\u062d\u0644\u064a\u0629.",
+    "local_model": "\u064a\u062d\u0645\u0651\u0644 \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u0646 \u062c\u0647\u0627\u0632\u0643 \u0641\u0642\u0637; \u0644\u0627 \u062a\u064f\u0633\u062a\u062e\u062f\u0645 \u062e\u062f\u0645\u0629 \u062a\u0634\u063a\u064a\u0644 \u062e\u0627\u0631\u062c\u064a. \u0627\u0644\u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0627\u0644\u062d\u0631\u0629 \u062a\u062d\u062a\u0627\u062c \u0647\u0630\u0627 \u0627\u0644\u062e\u064a\u0627\u0631.",
     "plan_only": "\u064a\u0646\u0634\u0626 \u062e\u0637\u0629 \u0648\u0644\u0627 \u064a\u0637\u0644\u0642 \u0623\u062f\u0648\u0627\u062a \u0639\u0644\u0649 \u0627\u0644\u0647\u062f\u0641.",
     "resume": "\u064a\u062a\u0637\u0644\u0628 \u0646\u0641\u0633 \u0627\u0644\u0646\u0637\u0627\u0642 \u0648\u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u0648\u0639\u062f\u062f \u0627\u0644\u062c\u0648\u0644\u0627\u062a \u0627\u0644\u0633\u0627\u0628\u0642.",
     "tool_profile": "\u064a\u062d\u062f\u062f \u0623\u064a \u0645\u062c\u0645\u0648\u0639\u0629 \u0623\u062f\u0648\u0627\u062a \u064a\u0633\u0645\u062d \u0644\u0644\u0648\u0643\u0644\u0627\u0621 \u0628\u0627\u062e\u062a\u064a\u0627\u0631\u0647\u0627 \u062e\u0644\u0627\u0644 \u062c\u0645\u064a\u0639 \u0627\u0644\u062c\u0648\u0644\u0627\u062a.",
@@ -77,6 +83,18 @@ CHOICE_LABELS = {
                      "discovery": "\u0627\u0643\u062a\u0634\u0627\u0641 \u0627\u0644\u0645\u0633\u0627\u0631\u0627\u062a \u0648\u0627\u0644\u0623\u0635\u0648\u0644",
                      "network": "\u0641\u062d\u0635 \u0627\u0644\u0634\u0628\u0643\u0629 \u0648 TLS"},
 }
+ADVANCED_TOOL_CHOICES = [
+    ("nuclei", "\u0642\u0648\u0627\u0644\u0628 \u0643\u0634\u0641 \u0642\u0627\u0628\u0644\u0629 \u0644\u0644\u062a\u062d\u0642\u0642"),
+    ("zap-baseline.py", "\u0641\u062d\u0635 \u062e\u0637 \u0627\u0644\u0623\u0633\u0627\u0633"),
+    ("dalfox", "\u0645\u062f\u062e\u0644\u0627\u062a URL \u0630\u0627\u062a \u0645\u0639\u0627\u0645\u0644\u0627\u062a"),
+    ("browser-xss", "\u062a\u062d\u0642\u0642 DOM \u0645\u062d\u062f\u0648\u062f"),
+    ("browser-xss-auth", "\u0645\u062a\u0635\u0641\u062d \u0645\u0648\u062b\u0651\u0642\u061b \u064a\u062d\u062a\u0627\u062c \u0645\u0644\u0641 \u0647\u0648\u064a\u0629"),
+    ("katana", "\u0632\u062d\u0641 \u0631\u0648\u0627\u0628\u0637 \u0636\u0645\u0646 \u0627\u0644\u0646\u0637\u0627\u0642"),
+    ("ffuf", "\u0627\u0643\u062a\u0634\u0627\u0641 \u0645\u0633\u0627\u0631\u0627\u062a \u0628\u0642\u0627\u0626\u0645\u0629 \u0643\u0644\u0645\u0627\u062a \u0645\u062d\u0644\u064a\u0629"),
+    ("nikto", "\u0645\u0631\u0627\u062c\u0639\u0629 \u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0627\u0644\u0648\u064a\u0628"),
+    ("nmap", "\u0645\u0644\u0641 \u0645\u0646\u0627\u0641\u0630 \u0645\u062d\u062f\u0648\u062f"),
+    ("sslscan", "\u0625\u0639\u062f\u0627\u062f TLS \u0644\u0645\u0648\u0627\u0642\u0639 HTTPS"),
+]
 
 
 def discover_job_reports(output_path):
@@ -146,6 +164,8 @@ def launch_desktop(parser):
     state = {"running": False, "closing": False, "cancel": None, "job_output": None}
     fields = []
     form_values = {}
+    selected_tool_vars = {}
+    operator_brief_box = None
     selected = tk.StringVar(value="auto-run")
     model_path = tk.StringVar(value=os.environ.get("MAHER_GGUF_MODEL", ""))
     status = tk.StringVar(value="Ready \u2022 \u062c\u0627\u0647\u0632")
@@ -237,10 +257,16 @@ def launch_desktop(parser):
             variable.set(path)
 
     def show_form(name):
+        nonlocal operator_brief_box
         if state["running"]:
             return
         if fields:
-            form_values[selected.get()] = {action.dest: variable.get() for action, flag, variable, required in fields}
+            saved_values = {action.dest: variable.get() for action, flag, variable, required in fields}
+            if selected_tool_vars:
+                saved_values["_selected_tools"] = [tool for tool, variable in selected_tool_vars.items() if variable.get()]
+            if operator_brief_box is not None:
+                saved_values["_operator_brief"] = operator_brief_box.get("1.0", "end-1c")
+            form_values[selected.get()] = saved_values
         selected.set(name)
         saved = form_values.get(name, {})
         heading.configure(text=display_names.get(name, name.replace("-", " ").title()))
@@ -248,13 +274,36 @@ def launch_desktop(parser):
         for child in form.winfo_children():
             child.destroy()
         fields.clear()
+        selected_tool_vars.clear()
+        operator_brief_box = None
         for action in commands[name]._actions:
             if isinstance(action, argparse._HelpAction):
+                continue
+            if name == "agent-tools-run" and action.dest == "targets":
+                # The guided screen accepts a single exact URL. The CLI still accepts URL-list files.
+                continue
+            if name == "agent-tools-run" and action.dest == "tool":
+                tool_box = ttk.LabelFrame(form, text="\u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0627\u0644\u062b\u0627\u0628\u062a\u0629 (\u0627\u062a\u0631\u0643\u0647\u0627 \u0641\u0627\u0631\u063a\u0629 \u0644\u0644\u062e\u0637\u0629 \u0627\u0644\u0645\u062d\u0644\u064a\u0629) ", padding=8)
+                tool_box.pack(fill="x", pady=8)
+                for index, (tool, label_text) in enumerate(ADVANCED_TOOL_CHOICES):
+                    variable = tk.BooleanVar(value=tool in saved.get("_selected_tools", []))
+                    selected_tool_vars[tool] = variable
+                    ttk.Checkbutton(tool_box, text=label_text, variable=variable).grid(
+                        row=index // 2, column=index % 2, sticky="w", padx=5, pady=3)
+                continue
+            if name == "agent-tools-run" and action.dest == "operator_brief":
+                brief_box = ttk.LabelFrame(form, text="\u062a\u0639\u0644\u064a\u0645\u0627\u062a \u0644\u0644\u0645\u0631\u0627\u062c\u0639\u064a\u0646 \u0627\u0644\u0645\u062d\u0644\u064a\u064a\u0646", padding=8)
+                brief_box.pack(fill="x", pady=8)
+                ttk.Label(brief_box, text="\u064a\u062a\u0637\u0644\u0628 \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u062d\u0644\u064a\u064b\u0627. \u0627\u0644\u062a\u0648\u062c\u064a\u0647 \u064a\u062e\u062a\u0627\u0631 \u0645\u0646 \u0627\u0644\u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0627\u0644\u0645\u0633\u0645\u0648\u062d\u0629 \u0641\u0642\u0637.",
+                          wraplength=700).pack(anchor="w")
+                operator_brief_box = tk.Text(brief_box, height=5, wrap="word")
+                operator_brief_box.pack(fill="x", pady=(6, 0))
+                operator_brief_box.insert("1.0", saved.get("_operator_brief", ""))
                 continue
             line = ttk.Frame(form, padding=(0, 6))
             line.pack(fill="x")
             flag = next((item for item in action.option_strings if item.startswith("--")), None)
-            required = action.required or not action.option_strings
+            required = action.required or not action.option_strings or (name == "agent-tools-run" and action.dest == "target")
             is_toggle = isinstance(action, argparse._StoreTrueAction)
             label = FIELD_LABELS.get(action.dest, (flag or action.dest).replace("-", " ").replace("_", " ").title())
             ttk.Label(line, text="" if is_toggle else label + (" *" if required else ""),
@@ -284,11 +333,16 @@ def launch_desktop(parser):
                                          "api_contract", "path", "manifest", "targets", "requests"}:
                         kind = "file"
                     if kind:
-                        ttk.Button(line, text="Browse", command=lambda value=variable, mode=kind: browse(value, mode)).pack(side="left", padx=4)
+                        button_text = "\u0627\u062e\u062a\u064a\u0627\u0631 \u0645\u0644\u0641 Burp/ZAP" if action.dest == "traffic" else "Browse"
+                        ttk.Button(line, text=button_text, command=lambda value=variable, mode=kind: browse(value, mode)).pack(side="left", padx=4)
                 help_text = FIELD_HELP.get(action.dest, action.help)
                 if help_text:
                     ttk.Label(form, text=help_text, wraplength=700).pack(anchor="w", padx=29)
             fields.append((action, flag, variable, required))
+        if name == "agent-tools-run":
+            note = ttk.Label(form, text="Burp Suite: \u0627\u062e\u062a\u0631 \u0645\u0644\u0641 Burp XML \u0623\u0648 ZAP HAR \u0647\u0646\u0627\u061b Maher \u064a\u0633\u062a\u0648\u0631\u062f \u0627\u0644\u0645\u0631\u0648\u0631 \u0648\u0644\u0627 \u064a\u0634\u063a\u0651\u0644 Burp \u0623\u0648 ZAP.",
+                             wraplength=730, justify="left")
+            note.pack(anchor="w", pady=(3, 8))
         if name == "agent-tools-run":
             from .tool_readiness import tool_readiness_snapshot
 
@@ -337,6 +391,17 @@ def launch_desktop(parser):
             value = {label: key for key, label in CHOICE_LABELS.get(action.dest, {}).items()}.get(value, value)
             if value:
                 argv.extend([flag, value] if flag else [value])
+        if selected.get() == "agent-tools-run":
+            for tool, variable in selected_tool_vars.items():
+                if variable.get():
+                    argv.extend(["--tool", tool])
+            brief = operator_brief_box.get("1.0", "end-1c").strip() if operator_brief_box is not None else ""
+            if brief:
+                local_model_enabled = any(action.dest == "local_model" and variable.get()
+                                          for action, flag, variable, required in fields)
+                if not local_model_enabled:
+                    raise ValueError("\u0641\u0639\u0651\u0644 \u0646\u0645\u0648\u0630\u062c GGUF \u0627\u0644\u0645\u062d\u0644\u064a \u0642\u0628\u0644 \u0643\u062a\u0627\u0628\u0629 \u062a\u0648\u062c\u064a\u0647 \u0644\u0644\u0648\u0643\u0644\u0627\u0621")
+                argv.append("--operator-brief=" + brief)
         # Validate types/choices using the same parser that dispatches the CLI.
         try:
             parser.parse_args(argv)

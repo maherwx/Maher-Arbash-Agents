@@ -16,6 +16,7 @@ from .json_numbers import finite_json_float
 from .tool_readiness import tool_readiness_snapshot, agent_tool_availability_context
 from .workflow_execution import validate_manifest
 from .browser_xss import load_browser_xss_profile
+from .traffic_ingest import ingest_traffic
 
 
 class AgentExecutionInputError(ValueError):
@@ -84,7 +85,8 @@ def _validate_packets(packets, known, browser_xss_profile=None, allowed_tools=No
 
 def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=None,
                        local_model=False, plan_only=False, max_rounds=3, resume=False,
-                       tool_profile="all", workflow_manifest=None):
+                       tool_profile="all", workflow_manifest=None, traffic_path=None,
+                       operator_brief=None, selected_tools=None):
     if not authorized:
         raise AgentExecutionInputError("agent tool execution requires explicit authorization")
     if type(resume) is not bool or (resume and (local_model or plan_only)):
@@ -108,10 +110,43 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         raise AgentExecutionInputError("rounds must be between one and three")
     if tool_profile not in AGENT_TOOL_PROFILES:
         raise AgentExecutionInputError("unknown local tool profile")
+    if operator_brief is not None and (not isinstance(operator_brief, str) or len(operator_brief) > 4000):
+        raise AgentExecutionInputError("operator brief must be a string no longer than 4000 characters")
+    operator_brief = operator_brief.strip() if isinstance(operator_brief, str) else ""
+    if operator_brief and not local_model:
+        raise AgentExecutionInputError("operator brief requires --local-model; external model APIs are not used")
     known, rejected = filter_in_scope_urls(targets, scope)
     if rejected or not known:
         raise AgentExecutionInputError("all initial targets must be explicitly in scope")
     known = list(dict.fromkeys(known))
+    traffic_summary = {"provided": bool(traffic_path), "imported_records": 0,
+                       "in_scope_urls_added": 0, "out_of_scope_urls_dropped": 0,
+                       "invalid_urls_dropped": 0, "url_limit_dropped": 0}
+    if traffic_path:
+        records = ingest_traffic(traffic_path, kind="auto")
+        observed = [row.get("url") for row in records if isinstance(row, dict)
+                    and isinstance(row.get("url"), str)]
+        valid_observed = []
+        for value in observed:
+            if len(value) > 8192 or value != value.strip():
+                continue
+            try:
+                parsed = urlparse(value)
+                if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                        or parsed.username is not None or parsed.password is not None or parsed.fragment):
+                    continue
+                _ = parsed.port
+            except ValueError:
+                continue
+            valid_observed.append(value)
+        traffic_summary["invalid_urls_dropped"] = len(observed) - len(valid_observed)
+        traffic_urls, outside_traffic = filter_in_scope_urls(valid_observed, scope)
+        traffic_summary["imported_records"] = len(records)
+        traffic_summary["out_of_scope_urls_dropped"] = len(outside_traffic)
+        combined = list(dict.fromkeys([*known, *traffic_urls]))
+        traffic_summary["in_scope_urls_added"] = max(0, len(combined) - len(known))
+        traffic_summary["url_limit_dropped"] = max(0, len(combined) - 120)
+        known = combined[:120]
     browser_xss_profile = None
     if workflow_manifest is not None:
         try:
@@ -132,11 +167,33 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         # An explicit model request must not silently turn into fixed planning.
         raise AgentExecutionInputError("local GGUF model unavailable; configure MAHER_GGUF_MODEL and local-inference")
     allowed_tools = set(AGENT_TOOL_PROFILES[tool_profile])
+    if selected_tools is not None:
+        if (not isinstance(selected_tools, (list, tuple, set))
+                or any(not isinstance(name, str) or name not in SUPPORTED_AGENT_TOOLS for name in selected_tools)):
+            raise AgentExecutionInputError("selected tools must use supported adapter names")
+        selected_set = set(selected_tools)
+        if "browser-xss-auth" in selected_set and browser_xss_profile is None:
+            raise AgentExecutionInputError("browser-xss-auth requires --workflow-manifest with a supplied identity profile")
+        profile_tools = set(allowed_tools)
+        if browser_xss_profile is not None and tool_profile in {"all", "web"}:
+            profile_tools.add("browser-xss-auth")
+        if selected_set - profile_tools:
+            raise AgentExecutionInputError("selected adapters are outside the chosen tool profile")
+        allowed_tools.intersection_update(selected_set)
     readiness = tool_readiness_snapshot()
     available_tools = {row["tool"] for row in readiness["tools"] if row.get("available") is True}
-    if browser_xss_profile is not None and "browser-xss" in available_tools and tool_profile in {"all", "web"}:
+    if (browser_xss_profile is not None and tool_profile in {"all", "web"}
+            and (selected_tools is None or "browser-xss-auth" in selected_tools)):
         allowed_tools.add("browser-xss-auth")
-        available_tools.add("browser-xss-auth")
+        if "browser-xss" in available_tools:
+            available_tools.add("browser-xss-auth")
+    if selected_tools is not None and "browser-xss-auth" in selected_tools:
+        if browser_xss_profile is None:
+            raise AgentExecutionInputError("browser-xss-auth requires --workflow-manifest with a supplied identity profile")
+        if tool_profile not in {"all", "web"}:
+            raise AgentExecutionInputError("authenticated browser checks require the web or all tool profile")
+        if "browser-xss" not in available_tools:
+            raise AgentExecutionInputError("authenticated browser prerequisite is missing: install the local Playwright package")
     if requests is not None:
         _validate_packets(requests, set(known), browser_xss_profile, allowed_tools)
     availability_context = agent_tool_availability_context(
@@ -158,6 +215,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
                 "prior_agent_evidence": outputs,
                 "research_method": {"can_schedule_next_round": packet["can_schedule_next_round"]},
                 "tool_availability": availability_context,
+                "operator_brief": operator_brief,
             })
             outputs.append(output)
         reviews.append({"round": packet["round"], "agents": outputs})
@@ -181,6 +239,8 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
                                  "authenticated_profile_sha256": (browser_xss_profile.get("profile_sha256")
                                      if browser_xss_profile else None)},
             "tool_readiness": readiness,
+            "traffic_import": traffic_summary,
+            "operator_brief_used": bool(operator_brief),
             "plan_only": plan_only, "execution_started": False}
     # Preserve the original plan on recovery, including if binding validation
     # later rejects changed inputs. No report/result files are written yet.
@@ -210,6 +270,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
               "execution_outcome": summarize_execution_outcome(execution),
               "planner_mode": plan["mode"], "model_inference_enabled": model is not None,
               "tool_profile": tool_profile, "tool_readiness": plan["tool_readiness"],
+              "traffic_import": traffic_summary,
               "execution": execution, "run_status_counts": counts, "model_reviews": reviews,
               "evidence_review": review_agent_evidence(execution["findings"], execution["runs"],
                                   [*known, *execution.get("new_in_scope_urls", [])], scope),

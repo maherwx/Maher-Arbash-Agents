@@ -30,16 +30,24 @@ example, the agents now include a fixed `sslscan` adapter for in-scope HTTPS
 origins. Its host/port arguments are chosen by the adapter and HTTP targets are
 filtered. Agents still cannot supply arbitrary shell commands or flags.
 
-Direct agent execution offers four tool profiles: all supported adapters, web
-application checks, route/asset discovery, or network and TLS checks. The
-selected profile limits requests in every round, including local-model
-proposals, and is recorded with the plan and results. The form also shows a
-local readiness snapshot for each adapter. It checks executable names on
-`PATH` and the optional Playwright Python dependency only; it does not launch a
-scanner or confirm a browser installation. A selected eligible adapter that
-is missing is recorded as a missing run, rather than a successful check.
-Authenticated browser checks remain part of supplied workflow profiles rather
-than direct tool execution.
+Direct agent execution offers a single-URL field, four tool profiles, optional
+Burp/ZAP traffic export, ten common adapter choices, and a local-model-only
+operator brief. Explicit adapter choices restrict all rounds to those selected
+fixed adapters; leaving every box empty uses the readiness-aware coordinator.
+The profile and selected adapter set constrain every round, including local
+model proposals. Nmap, ZAP, SSLScan, browser and discovery choices use their
+existing bounded adapters. The Burp/ZAP file button imports captured request
+URLs; Maher does not start either proxy application. Imported URLs are scope
+filtered and capped. Authenticated browser checks accept the explicit supplied
+workflow profile, without inventing login or credentials.
+
+The operator brief requires an already configured local GGUF model. It guides
+which permitted checks the local reviewers prioritize and cannot expand scope,
+choose credentials, change adapter flags, or execute shell text. No hosted model
+API is used. The form also shows a local readiness snapshot for each adapter. It
+checks executable names on `PATH` and the optional Playwright Python dependency
+only; it does not launch a scanner or confirm a browser installation. Browser
+availability remains unverified until an actual user-authorized launch.
 
 Required inputs, original defaults, boolean authorization flags, choices and
 numeric parser validation are preserved. You still supply scope, identities,

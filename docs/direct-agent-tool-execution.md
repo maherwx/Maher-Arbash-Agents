@@ -16,6 +16,22 @@ maher-bounty agent-tools-run --targets targets.json --scope scope.json --authori
 maher-bounty agent-tools-run --targets targets.json --scope scope.json --authorized --rounds 3 --out results/tools
 ```
 
+For a simpler single-URL run, the command also accepts `--target`. A local Burp
+XML or ZAP/HAR export can contribute only its exact URLs that pass the same scope
+policy; the combined input is capped at 120 URLs. Repeat `--tool` to select fixed
+adapters. Leaving it empty keeps the local readiness-aware coordinator in charge.
+
+```sh
+maher-bounty agent-tools-run --target "https://authorized.example/search?q=demo" \
+  --scope scope.json --authorized --traffic burp-export.xml \
+  --tool nuclei --tool zap-baseline.py --tool nmap --out results/selected-tools
+```
+
+Importing an export parses it locally and does not launch Burp or ZAP. A natural
+language operator brief requires `--local-model --operator-brief "..."`; it guides
+only the already constrained local reviewers. It cannot change scope, credentials,
+or adapter argument templates. No hosted model service is used.
+
 For the fixed authenticated browser verifier, supply a valid local workflow
 manifest containing an explicit `browser_xss_profile` (identity, session control,
 and positive account-specific proof) and choose the `web` or `all` tool profile:

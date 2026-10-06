@@ -14,6 +14,7 @@ from .source_review import review_source
 from .api_contract import review_api_contract, ContractInputError
 from .policy_agents import run_policy_agents
 from .agent_terminal import run_agent_terminal, load_execution_json, AgentExecutionInputError
+from .agent_tool_router import SUPPORTED_AGENT_TOOLS
 
 
 def doctor():
@@ -95,9 +96,14 @@ def build_parser():
     policy.add_argument("--out", default="results/policy-agents")
 
     terminal = s.add_parser("agent-tools-run", help="Plan, execute and review scoped local tools directly without recon setup")
-    terminal.add_argument("--targets", required=True, help="Local JSON array of exact authorized URLs")
+    terminal.add_argument("--targets", help="Local JSON array of exact authorized URLs")
+    terminal.add_argument("--target", help="One exact authorized HTTP/HTTPS URL")
     terminal.add_argument("--scope", required=True)
     terminal.add_argument("--requests", help="Optional local JSON worker tool-request packets")
+    terminal.add_argument("--tool", action="append", choices=sorted(SUPPORTED_AGENT_TOOLS),
+                          help="Run this fixed adapter against supplied URLs; repeat to select several")
+    terminal.add_argument("--operator-brief", help="Bounded natural-language guidance for configured local GGUF reviewers")
+    terminal.add_argument("--traffic", help="Optional local Burp XML or ZAP/HAR export; exact in-scope URLs are added")
     terminal.add_argument("--authorized", action="store_true")
     terminal.add_argument("--local-model", action="store_true", help="Require configured in-process GGUF reasoning")
     terminal.add_argument("--plan-only", action="store_true", help="Write plan without launching target tools")
@@ -157,14 +163,23 @@ def _main():
         from .desktop_ui import launch_desktop
         return launch_desktop(build_parser())
     if a.cmd == "agent-tools-run":
-        result = run_agent_terminal(load_execution_json(a.targets), load_execution_json(a.scope), a.out,
-            authorized=a.authorized, requests=load_execution_json(a.requests) if a.requests else None,
+        if bool(a.targets) == bool(a.target):
+            raise AgentExecutionInputError("provide exactly one of --target or --targets")
+        targets = [a.target] if a.target else load_execution_json(a.targets)
+        requests = load_execution_json(a.requests) if a.requests else None
+        if a.tool and requests is not None:
+            raise AgentExecutionInputError("choose --tool or --requests, not both")
+        result = run_agent_terminal(targets, load_execution_json(a.scope), a.out,
+            authorized=a.authorized, requests=requests, operator_brief=a.operator_brief,
+            selected_tools=a.tool,
             local_model=a.local_model, plan_only=a.plan_only, max_rounds=a.rounds, resume=a.resume,
             tool_profile=a.tool_profile,
-            workflow_manifest=load_execution_json(a.workflow_manifest) if a.workflow_manifest else None)
+            workflow_manifest=load_execution_json(a.workflow_manifest) if a.workflow_manifest else None,
+            traffic_path=a.traffic)
         print(json.dumps({"status": result["status"], "run_status_counts": result.get("run_status_counts", {}),
                           "execution_resumed": result.get("execution_resumed", False),
                           "execution_outcome": result.get("execution_outcome"),
+                          "traffic_import": result.get("traffic_import") or result.get("plan", {}).get("traffic_import"),
                           "finding_report": result.get("finding_report"),
                           "out": a.out}, indent=2))
         return 0

@@ -64,3 +64,23 @@ class AgentTerminalTests(unittest.TestCase):
         requests = [row for packet in result["plan"]["initial_requests"] for row in packet["tool_requests"]]
         self.assertNotIn("browser-xss-auth", {row["tool"] for row in requests})
 
+    def test_explicit_adapter_selection_limits_the_plan(self):
+        target = "https://app.example.test/"
+        snapshot = {"tools": [
+            {"tool": "nmap", "available": True, "status": "available"},
+            {"tool": "httpx", "available": True, "status": "available"},
+        ]}
+        with tempfile.TemporaryDirectory() as out, \
+             patch("maher_bounty.agent_terminal.tool_readiness_snapshot", return_value=snapshot):
+            result = run_agent_terminal(
+                [target], {"assets": [target], "out_of_scope": []}, out,
+                authorized=True, plan_only=True, tool_profile="all", selected_tools=["nmap", "httpx"])
+        requests = [row for packet in result["plan"]["initial_requests"] for row in packet["tool_requests"]]
+        self.assertEqual({row["tool"] for row in requests}, {"nmap", "httpx"})
+
+    def test_freeform_operator_brief_requires_local_model(self):
+        target = "https://app.example.test/"
+        with self.assertRaisesRegex(AgentExecutionInputError, "requires --local-model"):
+            run_agent_terminal([target], {"assets": [target], "out_of_scope": []},
+                               tempfile.gettempdir(), authorized=True,
+                               operator_brief="Review object ownership policy")
