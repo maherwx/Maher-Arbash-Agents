@@ -134,8 +134,10 @@ stop reason and deferred work. A successful process exit is not a security resul
 Model reviews are separate from the adapters' actual findings. Outputs may contain
 sensitive URLs, tool output and model excerpts; keep them private. Checkpoints
 support native completed-round recovery via `--resume`, as described below.
-Use a fresh output directory for a new invocation; existing state requires an
-explicit recovery request and must not automatically repeat uncertain effects.
+Without --out, each invocation automatically gets a fresh timestamped folder
+under `results/agent-tools`; previous output and checkpoint data are preserved.
+To resume a completed round, pass `--resume` with the original `--out` path.
+Do not resume a checkpoint marked as running because its effects are uncertain.
 
 ## Complete recorded finding report
 
