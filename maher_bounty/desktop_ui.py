@@ -458,7 +458,7 @@ def launch_desktop(parser):
             if "--out" not in argv:
                 output_action = next(action for action in commands["agent-tools-run"]._actions
                                      if action.dest == "out")
-                base = Path(output_action.default)
+                base = Path(output_action.default or "results/agent-tools")
                 candidate = Path(state["next_output"]) if state["next_output"] else None
                 if candidate is None or candidate.exists():
                     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
