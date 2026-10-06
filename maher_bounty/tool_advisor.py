@@ -20,6 +20,7 @@ CATALOG = (
     {"name": "nuclei", "command": "nuclei", "areas": {"web", "api", "cms", "tls"}, "mode": "active"},
     {"name": "nikto", "command": "nikto", "areas": {"web"}, "mode": "active"},
     {"name": "dalfox", "command": "dalfox", "areas": {"javascript", "web"}, "mode": "active"},
+    {"name": "arjun", "command": "arjun", "areas": {"web", "api"}, "mode": "active"},
     {"name": "naabu", "command": "naabu", "areas": {"network"}, "mode": "active"},
     {"name": "nmap", "command": "nmap", "areas": {"network", "tls"}, "mode": "active"},
     {"name": "tlsx", "command": "tlsx", "areas": {"tls"}, "mode": "active"},
