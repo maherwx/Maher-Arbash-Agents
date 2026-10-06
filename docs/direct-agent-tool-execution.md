@@ -110,3 +110,30 @@ compare hashes before combining them after interruption/concurrent writers.
 This is not a two-file transaction. Reports contain sensitive originals and
 must remain private. No tests/tools/models/applications were run to verify this
 addition; it remains unverified at runtime.
+
+## Recorded evidence review
+
+Direct execution now attaches an explicit review to every tool finding. Missing
+targets/evidence and out-of-scope reported targets are flagged while their original
+records remain in the report. Other scanner messages require independent
+validation; `validated: true`, severity and repeated messages alone cannot
+establish execution proof or confirmed impact. Local model reviewers receive the
+same recorded-evidence review with execution feedback, and cannot change it by
+claiming that a hypothesis is validated.
+
+Browser marker findings may receive `recorded_browser_execution_proof` only when
+two distinct valid marker tokens/attributes and the passed negative control match
+the recorded confirmed check for the same query occurrence, tool and target hash.
+Authenticated browser records also require matching identity and profile metadata.
+The direct command does not enable authenticated browser execution on its own;
+that adapter still requires the existing workflow profile path. These checks
+compare records from the same invocation, not independent browser reruns, and
+never confirm application impact. Existing host-based scope policy remains.
+
+Dalfox text extraction no longer promotes a line to validated solely because it
+contains `verified`. Whole-word negative/unverified statements are excluded from
+the textual candidate classifier; positive scanner text remains an unvalidated
+candidate needing browser proof. This classification also affects the existing
+full pipeline because it shares the extractor. There is no new target request,
+exploit execution or scanner launch in the review layer. Source/diff review only;
+runtime behavior has not been tested.

@@ -114,8 +114,11 @@ def _dalfox_findings(path: Path, target: str) -> list[dict]:
     findings = []
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         low = line.lower()
-        if "vulnerable" in low or "verified" in low:
-            findings.append({"source": "dalfox", "title": "Potential XSS", "severity": "medium", "target": target, "evidence": line.strip()[:1000], "validated": "verified" in low})
+        if (re.search(r"\b(?:vulnerable|verified)\b", low)
+                and not re.search(r"\b(?:not\s+(?:vulnerable|verified)|unverified|unverifiable)\b", low)):
+            findings.append({"source": "dalfox", "title": "Potential XSS", "severity": "medium", "target": target,
+                             "evidence": line.strip()[:1000], "validated": False,
+                             "basis": "text scanner message; independent browser execution proof required"})
     return findings
 
 

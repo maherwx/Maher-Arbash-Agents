@@ -10,6 +10,7 @@ from .artifact_io import write_json_atomic
 from .model_adapter import LocalModelAdapter
 from .scope_policy import filter_in_scope_urls
 from .agent_findings_report import write_agent_findings_report
+from .agent_evidence_review import review_agent_evidence
 
 
 class AgentExecutionInputError(ValueError):
@@ -112,6 +113,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
                 "scope": scope, "rules": {"active_testing": {"enabled": True}},
                 "inventory": {"endpoints": [{"value": url} for url in packet["known_urls"]]},
                 "execution_feedback": packet,
+                "validated_evidence": review_agent_evidence(packet["findings"], packet["runs"], packet["known_urls"], scope),
                 "prior_agent_evidence": outputs,
                 "research_method": {"can_schedule_next_round": packet["can_schedule_next_round"]},
             })
@@ -141,6 +143,8 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
     result = {"status": "finished" if execution["runs"] else "not_run",
               "planner_mode": plan["mode"], "model_inference_enabled": model is not None,
               "execution": execution, "run_status_counts": counts, "model_reviews": reviews,
+              "evidence_review": review_agent_evidence(execution["findings"], execution["runs"],
+                                  [*known, *execution.get("new_in_scope_urls", [])], scope),
               "limitations": ["process exit success does not prove vulnerability absence or exploit validity",
                               "native planning is fixed rules; model roles share one supplied local GGUF instance",
                               "only supported tool adapters execute; no arbitrary shell command generation"]}

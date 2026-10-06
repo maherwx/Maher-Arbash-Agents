@@ -57,6 +57,10 @@ def _write_markdown(path, text):
 def write_agent_findings_report(result, scope, targets, out_dir):
     execution = result["execution"]
     findings = [_entry(value, index, "tool") for index, value in enumerate(execution.get("findings", []), 1)]
+    evidence_review = result.get("evidence_review", {})
+    review_by_id = {item["record_id"]: item for item in evidence_review.get("records", [])}
+    for entry in findings:
+        entry["evidence_review"] = review_by_id.get(entry["record_id"], {"review_state": "not_reviewed"})
     hypotheses = []
     for review in result.get("model_reviews", []):
         for agent in review.get("agents", []):
@@ -74,11 +78,13 @@ def write_agent_findings_report(result, scope, targets, out_dir):
               "summary": {"tool_finding_records": len(findings), "model_hypothesis_records": len(hypotheses),
                           "unique_exact_tool_records": len(hashes),
                           "verification_counts": dict(Counter(item["verification"] for item in findings)),
+                          "evidence_review_counts": evidence_review.get("counts", {}),
                           "run_status_counts": result["run_status_counts"],
                           "remaining_deferred_request_count": execution.get("remaining_deferred_request_count", 0),
                           "remaining_native_request_count": execution.get("remaining_native_request_count", 0),
                           "stop_reason": execution.get("stop_reason")},
               "findings": findings, "model_hypotheses": hypotheses,
+              "evidence_review": evidence_review,
               "runs": runs, "decisions": execution.get("decisions", []), "rounds": execution.get("rounds", []),
               "pending_request_proposals": execution.get("pending_request_proposals", []),
               "limitations": ["all recorded findings preserved, including duplicates and missing metadata",
