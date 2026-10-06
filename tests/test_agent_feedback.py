@@ -127,7 +127,7 @@ class AgentFeedbackTests(unittest.TestCase):
                 return_value={"runs": [], "findings": [], "new_in_scope_urls": []}) as execute:
             result = run_agent_tool_feedback(rows, [self.origin], td, scope={"assets": [self.origin]},
                                              target_references={"ref": self.origin})
-        sent = execute.call_args.args[0][0]["tool_requests"]
+        sent = execute.call_args_list[0].args[0][0]["tool_requests"]
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0]["tool"], "zap-baseline.py")
         self.assertEqual(sent[0]["targets"], [self.origin])
