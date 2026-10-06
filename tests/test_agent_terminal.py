@@ -36,7 +36,7 @@ class AgentTerminalTests(unittest.TestCase):
 
     def test_profile_and_browser_prerequisite_enable_fixed_authenticated_plan(self):
         target = "https://app.example.test/search?q=record"
-        snapshot = {"tools": [
+        snapshot = {"commands_launched": False, "tools": [
             {"tool": "browser-xss", "available": True, "status": "dependency_present_browser_unverified"},
             {"tool": "browser-xss-auth", "available": False, "status": "workflow_only"},
         ]}
