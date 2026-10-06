@@ -56,8 +56,12 @@ persisted checks contain only header/cookie name, operator and pass/fail.
 
 Mappings are bounded to 100 headers and 100 cookies, names to 128 characters,
 literal strings to 4,096 characters and token lists to 100 items. Metadata
-evaluation is bounded to 1,000 fields and 131,072 aggregate characters. Invalid
-or incomplete metadata fails policy checks. Programmatic custom transports must
+evaluation is bounded to 1,000 fields and 131,072 aggregate characters. Each
+check records `evidence_complete`. Invalid/incomplete metadata, unsupported
+collapsed value metadata, malformed comma lists and ambiguous cookie records
+make the workflow/access observation inconclusive rather than producing an
+invariant finding or a completed negative access check. Missing required headers
+or cookies in complete metadata are ordinary policy mismatches. Programmatic custom transports must
 supply `header_items` as a list of separate `(name, value)` pairs for value and
 cookie checks; a collapsed `headers` dictionary supports only presence checks.
 

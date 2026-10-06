@@ -702,7 +702,8 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
         response = send(name, request)
         checks = _assertions(response, expected)
         rows.append({"step": index, "identity": name, **_observation(response, checks)})
-        if response.get("truncated") or response.get("network_incomplete") or not checks:
+        if (response.get("truncated") or response.get("network_incomplete") or not checks
+                or any(check.get("evidence_complete") is False for check in checks)):
             raise RuntimeError("incomplete workflow evidence")
         passed = all(c["passed"] for c in checks)
         if passed:
@@ -761,7 +762,8 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                     rows.append({"identity": name, "role": "denied", "repeat": repeat,
                                  **_observation(response, checks), "resource_proof_passed": hit,
                                  "differential": compare_responses(control, response)})
-                    if response.get("truncated") or response.get("network_incomplete"):
+                    if (response.get("truncated") or response.get("network_incomplete")
+                            or any(check.get("evidence_complete") is False for check in checks)):
                         raise RuntimeError("incomplete denied resource evidence")
                 if any(hits) and not all(hits):
                     raise InconsistentAccessEvidence("forbidden resource proof changed across repeats")

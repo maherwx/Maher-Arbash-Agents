@@ -99,6 +99,7 @@ def response_policy_assertions(response, expected):
         values = grouped.get(name.lower(), [])
         for operator, wanted in policy.items():
             passed = False
+            evidence_complete = complete and (operator == "present" or duplicate_preserved)
             if complete:
                 if operator == "present":
                     passed = bool(values) is wanted
@@ -108,9 +109,14 @@ def response_policy_assertions(response, expected):
                     passed = bool(values) and all(wanted in value for value in values)
                 elif operator == "comma_tokens" and duplicate_preserved:
                     tokens = _comma_tokens(values) if values else None
+                    # Missing header is a complete policy mismatch; malformed
+                    # list syntax is uncertain evidence instead.
+                    if values and tokens is None:
+                        evidence_complete = False
                     passed = tokens is not None and all(token.lower() in tokens for token in wanted)
             checks.append({"kind": "response_header", "header": name.lower(),
-                           "operator": operator, "passed": passed})
+                           "operator": operator, "passed": passed,
+                           "evidence_complete": evidence_complete})
     if not expected.get("response_cookies"):
         return checks
     cookies, cookies_valid = {}, complete and duplicate_preserved
@@ -130,6 +136,7 @@ def response_policy_assertions(response, expected):
         values = cookies.get(name, [])
         for operator, wanted in policy.items():
             passed = False
+            evidence_complete = cookies_valid and len(values) <= 1
             # Reissued same-name cookies can differ in path/domain and replace
             # one another. Do not infer a unique effective cookie from them.
             if cookies_valid and len(values) == 1:
@@ -143,5 +150,6 @@ def response_policy_assertions(response, expected):
                 elif operator == "domain_absent":
                     passed = (not bool(cookie["domain"])) is wanted
             checks.append({"kind": "response_cookie", "cookie": name,
-                           "operator": operator, "passed": passed})
+                           "operator": operator, "passed": passed,
+                           "evidence_complete": evidence_complete})
     return checks
