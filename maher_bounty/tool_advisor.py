@@ -23,6 +23,7 @@ CATALOG = (
     {"name": "naabu", "command": "naabu", "areas": {"network"}, "mode": "active"},
     {"name": "nmap", "command": "nmap", "areas": {"network", "tls"}, "mode": "active"},
     {"name": "tlsx", "command": "tlsx", "areas": {"tls"}, "mode": "active"},
+    {"name": "sslscan", "command": "sslscan", "areas": {"tls"}, "mode": "active"},
     {"name": "ffuf", "command": "ffuf", "areas": {"web", "api"}, "mode": "active"},
     {"name": "gobuster", "command": "gobuster", "areas": {"web", "api"}, "mode": "active"},
     {"name": "zap-baseline", "command": "zap-baseline.py", "areas": {"web", "api"}, "mode": "passive"},

@@ -20,6 +20,16 @@ service status, doctor and benchmark options are available. The benchmark is
 only exposed as an existing command; it was not run during UI development.
 The GUI does not recursively offer itself as a worker command.
 
+Operations are grouped into Arabic categories for assessment, access workflows,
+source/traffic, reports/service and setup. Common fields use plain Arabic labels;
+the selected operation displays what it does and whether it sends requests to a
+target. Authorization and local-model controls explain their effect, and
+report/source paths are labeled separately from site URLs. The terminal option
+shows only authorized local tool adapters; for
+example, the agents now include a fixed `sslscan` adapter for in-scope HTTPS
+origins. Its host/port arguments are chosen by the adapter and HTTP targets are
+filtered. Agents still cannot supply arbitrary shell commands or flags.
+
 Required inputs, original defaults, boolean authorization flags, choices and
 numeric parser validation are preserved. You still supply scope, identities,
 traffic exports, source paths, request packets and assessment manifests. The

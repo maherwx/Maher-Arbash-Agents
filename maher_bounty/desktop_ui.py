@@ -11,6 +11,66 @@ from pathlib import Path
 from .process_runtime import run, ProcessCancelled, OutputLimitExceeded
 
 
+OPERATION_GROUPS = {
+    "run": "\u0627\u0644\u0641\u062d\u0635", "auto-run": "\u0627\u0644\u0641\u062d\u0635", "agent-tools-run": "\u0627\u0644\u0641\u062d\u0635",
+    "workflow-run": "\u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a \u0648\u0633\u064a\u0631 \u0627\u0644\u0639\u0645\u0644", "policy-agents-run": "\u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a \u0648\u0633\u064a\u0631 \u0627\u0644\u0639\u0645\u0644",
+    "api-contract-review": "\u0627\u0644\u0635\u0644\u0627\u062d\u064a\u0627\u062a \u0648\u0633\u064a\u0631 \u0627\u0644\u0639\u0645\u0644",
+    "source-review": "\u0627\u0644\u0643\u0648\u062f \u0648\u062d\u0631\u0643\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", "traffic-import": "\u0627\u0644\u0643\u0648\u062f \u0648\u062d\u0631\u0643\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
+    "traffic-analyze": "\u0627\u0644\u0643\u0648\u062f \u0648\u062d\u0631\u0643\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
+    "inventory": "\u0627\u0644\u062a\u0642\u0627\u0631\u064a\u0631 \u0648\u0627\u0644\u062e\u062f\u0645\u0629", "serve": "\u0627\u0644\u062a\u0642\u0627\u0631\u064a\u0631 \u0648\u0627\u0644\u062e\u062f\u0645\u0629",
+    "service-status": "\u0627\u0644\u062a\u0642\u0627\u0631\u064a\u0631 \u0648\u0627\u0644\u062e\u062f\u0645\u0629",
+    "doctor": "\u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0648\u0627\u0644\u0625\u0639\u062f\u0627\u062f", "workflow-benchmark": "\u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0648\u0627\u0644\u0625\u0639\u062f\u0627\u062f",
+}
+OPERATION_LABELS = {
+    "run": "\u062a\u0634\u063a\u064a\u0644 \u0645\u0633\u0627\u0631 \u0627\u0644\u0648\u0643\u0644\u0627\u0621", "auto-run": "\u0627\u0643\u062a\u0634\u0627\u0641 \u0648\u0641\u062d\u0635 \u0645\u0648\u0642\u0639",
+    "agent-tools-run": "\u062a\u0634\u063a\u064a\u0644 \u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0641\u062d\u0635", "workflow-run": "\u0627\u062e\u062a\u0628\u0627\u0631 \u0633\u064a\u0631 \u0627\u0644\u0639\u0645\u0644",
+    "policy-agents-run": "\u0627\u062e\u062a\u0628\u0627\u0631 \u0635\u0644\u0627\u062d\u064a\u0627\u062a \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a", "api-contract-review": "\u0645\u0631\u0627\u062c\u0639\u0629 \u0645\u0644\u0641 OpenAPI",
+    "source-review": "\u0645\u0631\u0627\u062c\u0639\u0629 \u0643\u0648\u062f \u0645\u062d\u0644\u064a", "traffic-import": "\u0627\u0633\u062a\u064a\u0631\u0627\u062f Burp \u0623\u0648 HAR",
+    "traffic-analyze": "\u062a\u062d\u0644\u064a\u0644 \u062d\u0631\u0643\u0629 \u0645\u062d\u0641\u0648\u0638\u0629", "inventory": "\u0628\u0646\u0627\u0621 \u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0623\u0635\u0648\u0644",
+    "serve": "\u0645\u0631\u0627\u0642\u0628\u0629 \u0645\u062c\u0644\u062f \u0628\u0627\u0633\u062a\u0645\u0631\u0627\u0631", "service-status": "\u0639\u0631\u0636 \u062d\u0627\u0644\u0629 \u0627\u0644\u062e\u062f\u0645\u0629",
+    "doctor": "\u0641\u062d\u0635 \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u062b\u0628\u062a\u0629", "workflow-benchmark": "\u0645\u0642\u064a\u0627\u0633 \u0645\u062d\u0644\u064a",
+}
+OPERATION_DESCRIPTIONS = {
+    "run": "\u064a\u0634\u063a\u0651\u0644 \u0627\u0644\u0648\u0643\u0644\u0627\u0621 \u0648\u064a\u0646\u0641\u0630 \u0627\u0644\u0641\u062d\u0635 \u062d\u0633\u0628 \u0645\u0644\u0641\u064a \u0627\u0644\u0646\u0637\u0627\u0642 \u0648\u0627\u0644\u0642\u0648\u0627\u0639\u062f.",
+    "auto-run": "\u064a\u062c\u0645\u0639 \u0627\u0644\u0623\u0635\u0648\u0644 \u0627\u0644\u0645\u062a\u0627\u062d\u0629 \u062b\u0645 \u064a\u0634\u063a\u0651\u0644 \u0627\u0644\u0641\u062d\u0635. \u064a\u0631\u0633\u0644 \u0637\u0644\u0628\u0627\u062a \u0644\u0644\u0647\u062f\u0641 \u0627\u0644\u0645\u0635\u0631\u0651\u062d \u0628\u0647.",
+    "agent-tools-run": "\u064a\u0634\u063a\u0651\u0644 \u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0623\u062f\u0648\u0627\u062a \u0645\u062d\u0644\u064a\u0629 \u0645\u062d\u062f\u062f\u0629 \u0644\u0644\u0646\u0637\u0627\u0642. \u0627\u0644\u0648\u0643\u0644\u0627\u0621 \u0644\u0627 \u064a\u0643\u062a\u0628\u0648\u0646 \u0623\u0648\u0627\u0645\u0631 \u0634\u064a\u0644 \u0645\u0646 \u062a\u0644\u0642\u0627\u0621 \u0623\u0646\u0641\u0633\u0647\u0645.",
+    "workflow-run": "\u064a\u0646\u0641\u0630 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0648\u0641\u062d\u0648\u0635 \u0627\u0644\u062d\u0627\u0644\u0629 \u0627\u0644\u0645\u0643\u062a\u0648\u0628\u0629 \u0641\u064a \u0627\u0644\u0645\u0644\u0641.",
+    "policy-agents-run": "\u064a\u062e\u062a\u0628\u0631 \u0635\u0644\u0627\u062d\u064a\u0627\u062a \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a \u0627\u0644\u0645\u0632\u0648\u0651\u062f\u0629 \u0648\u0627\u0644\u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0645\u0635\u0631\u0651\u062d\u0629.",
+    "api-contract-review": "\u064a\u0631\u0627\u062c\u0639 \u0645\u0644\u0641 OpenAPI \u0645\u062d\u0644\u064a\u064b\u0627 \u062f\u0648\u0646 \u0625\u0631\u0633\u0627\u0644 \u0637\u0644\u0628\u0627\u062a \u0644\u0644\u0645\u0648\u0642\u0639.",
+    "source-review": "\u064a\u062d\u0644\u0644 \u0645\u0644\u0641\u0627\u062a \u0627\u0644\u0643\u0648\u062f \u0627\u0644\u0645\u062d\u0644\u064a\u0629 \u062f\u0648\u0646 \u0627\u0644\u0627\u062a\u0635\u0627\u0644 \u0628\u0627\u0644\u0647\u062f\u0641.",
+    "traffic-import": "\u064a\u0642\u0631\u0623 \u062a\u0635\u062f\u064a\u0631 Burp/HAR \u0645\u0648\u062c\u0648\u062f\u064b\u0627. \u0644\u0627 \u064a\u0634\u063a\u0651\u0644 Burp \u0648\u0644\u0627 \u064a\u062a\u0635\u0644 \u0628\u0627\u0644\u0645\u0648\u0642\u0639.",
+    "traffic-analyze": "\u064a\u062d\u0644\u0644 \u062d\u0631\u0643\u0629 \u0645\u062d\u0641\u0648\u0638\u0629 \u0648\u064a\u0643\u062a\u0628 \u062a\u0642\u0627\u0631\u064a\u0631 \u0645\u062d\u0644\u064a\u0629.",
+    "inventory": "\u064a\u0628\u0646\u064a \u0642\u0627\u0626\u0645\u0629 \u0645\u0646 \u0645\u0644\u0641\u0627\u062a \u062c\u0645\u0639 \u0633\u0627\u0628\u0642\u0629.",
+    "serve": "\u064a\u0639\u0627\u0644\u062c \u0645\u0644\u0641\u0627\u062a \u0645\u062c\u0644\u062f \u0645\u062d\u0644\u064a \u0628\u0627\u0633\u062a\u0645\u0631\u0627\u0631.",
+    "service-status": "\u064a\u0639\u0631\u0636 \u062d\u0627\u0644\u0629 \u062e\u062f\u0645\u0629 \u0627\u0644\u0645\u0631\u0627\u0642\u0628\u0629 \u0627\u0644\u0645\u062d\u0644\u064a\u0629.",
+    "doctor": "\u064a\u0639\u0631\u0636 \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u062b\u0628\u062a\u0629 \u0648\u0627\u0644\u0645\u062a\u0627\u062d\u0629.",
+    "workflow-benchmark": "\u064a\u0634\u063a\u0651\u0644 \u0642\u064a\u0627\u0633\u064b\u0627 \u0645\u062d\u0644\u064a\u064b\u0627 \u0628\u062d\u0627\u0644\u0627\u062a \u0627\u062e\u062a\u0628\u0627\u0631 \u0645\u0648\u0644\u0651\u062f\u0629.",
+}
+FIELD_LABELS = {
+    "target": "\u0631\u0627\u0628\u0637 \u0627\u0644\u0645\u0648\u0642\u0639 \u0627\u0644\u0645\u0635\u0631\u0651\u062d", "targets": "\u0645\u0644\u0641 \u0631\u0648\u0627\u0628\u0637 \u0627\u0644\u0623\u0647\u062f\u0627\u0641",
+    "scope": "\u0645\u0644\u0641 \u0627\u0644\u0646\u0637\u0627\u0642 \u0627\u0644\u0645\u0633\u0645\u0648\u062d", "rules": "\u0645\u0644\u0641 \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0641\u062d\u0635",
+    "authorized": "\u0644\u062f\u064a \u0625\u0630\u0646 \u0644\u0641\u062d\u0635 \u0647\u0630\u0627 \u0627\u0644\u0646\u0637\u0627\u0642",
+    "traffic": "\u0645\u0644\u0641 \u062d\u0631\u0643\u0629 Burp/HAR \u0645\u0648\u062c\u0648\u062f", "workflow_manifest": "\u0645\u0644\u0641 \u062e\u0637\u0648\u0627\u062a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631",
+    "manifest": "\u0645\u0644\u0641 \u062d\u0627\u0644\u0627\u062a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631", "source_dir": "\u0645\u062c\u0644\u062f \u0627\u0644\u0643\u0648\u062f \u0627\u0644\u0645\u062d\u0644\u064a",
+    "api_contract": "\u0645\u0644\u0641 OpenAPI \u0645\u062d\u0644\u064a", "out": "\u0645\u0643\u0627\u0646 \u062d\u0641\u0638 \u0627\u0644\u0646\u062a\u0627\u0626\u062c",
+    "rounds": "\u0623\u0642\u0635\u0649 \u0639\u062f\u062f \u0644\u0644\u062c\u0648\u0644\u0627\u062a", "requests": "\u0645\u0644\u0641 \u0637\u0644\u0628\u0627\u062a \u0623\u062f\u0648\u0627\u062a \u0627\u062e\u062a\u064a\u0627\u0631\u064a",
+    "local_model": "\u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u062d\u0644\u064a \u0645\u064f\u0639\u062f", "plan_only": "\u0625\u0639\u062f\u0627\u062f \u062e\u0637\u0629 \u062f\u0648\u0646 \u062a\u0634\u063a\u064a\u0644 \u0623\u062f\u0648\u0627\u062a",
+    "resume": "\u0627\u0633\u062a\u0626\u0646\u0627\u0641 \u062a\u0646\u0641\u064a\u0630 \u0645\u062d\u0641\u0648\u0638 \u0645\u0637\u0627\u0628\u0642",
+}
+FIELD_HELP = {
+    "scope": "\u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0646\u0637\u0627\u0642 \u062a\u062d\u062f\u062f \u0645\u0627 \u064a\u0633\u0645\u062d \u0644\u0644\u0648\u0643\u0644\u0627\u0621 \u0628\u0641\u062d\u0635\u0647.",
+    "authorized": "\u064a\u062c\u0628 \u0645\u0644\u0643\u064a\u0629 \u0627\u0644\u0647\u062f\u0641 \u0623\u0648 \u0648\u062c\u0648\u062f \u0625\u0630\u0646 \u0648\u0627\u0636\u062d \u0642\u0628\u0644 \u0627\u0644\u062a\u0646\u0641\u064a\u0630.",
+    "traffic": "\u0645\u0644\u0641 \u0635\u062f\u0651\u0631\u062a\u0647 \u0645\u0633\u0628\u0642\u064b\u0627 \u0645\u0646 Burp \u0623\u0648 ZAP. \u0644\u0627 \u062a\u0643\u062a\u0628 \u0645\u0633\u0627\u0631\u064b\u0627 \u0648\u0647\u0645\u064a\u064b\u0627.",
+    "workflow_manifest": "\u0645\u0644\u0641 JSON \u064a\u0635\u0641 \u0627\u0644\u0647\u0648\u064a\u0627\u062a \u0648\u062e\u0637\u0648\u0627\u062a \u0627\u0644\u0641\u062d\u0635 \u0627\u0644\u0645\u0635\u0631\u0651\u062d\u0629.",
+    "api_contract": "\u0645\u0644\u0641 OpenAPI \u0645\u062d\u0644\u064a \u0644\u0645\u0631\u0627\u062c\u0639\u0629 \u0639\u0642\u062f API.",
+    "source_dir": "\u0645\u062c\u0644\u062f \u0645\u0635\u062f\u0631 \u0645\u062d\u0644\u064a \u0644\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0643\u0648\u062f.",
+    "requests": "\u0627\u062e\u062a\u064a\u0627\u0631\u064a: \u062a\u0639\u0631\u064a\u0641 \u0623\u062f\u0648\u0627\u062a \u0645\u062d\u062f\u062f\u0629. \u0645\u0644\u0641 \u0627\u0644\u0646\u0637\u0627\u0642 \u064a\u0628\u0642\u0649 \u0627\u0644\u0645\u0631\u062c\u0639.",
+    "local_model": "\u064a\u0633\u062a\u062e\u062f\u0645 \u0641\u0642\u0637 \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u0648\u062c\u0648\u062f \u0639\u0644\u0649 \u062c\u0647\u0627\u0632\u0643.",
+    "plan_only": "\u064a\u0646\u0634\u0626 \u062e\u0637\u0629 \u0648\u0644\u0627 \u064a\u0637\u0644\u0642 \u0623\u062f\u0648\u0627\u062a \u0639\u0644\u0649 \u0627\u0644\u0647\u062f\u0641.",
+    "resume": "\u064a\u062a\u0637\u0644\u0628 \u0646\u0641\u0633 \u0627\u0644\u0646\u0637\u0627\u0642 \u0648\u0627\u0644\u0645\u062f\u062e\u0644\u0627\u062a \u0648\u0639\u062f\u062f \u0627\u0644\u062c\u0648\u0644\u0627\u062a \u0627\u0644\u0633\u0627\u0628\u0642.",
+}
+
+
 def discover_job_reports(output_path):
     """Read-only bounded discovery of text artifacts under the chosen job output."""
     root = Path(output_path).resolve()
@@ -92,16 +152,33 @@ def launch_desktop(parser):
     navigation = ttk.Frame(body, padding=(0, 0, 20, 0))
     navigation.pack(side="left", fill="y")
     ttk.Label(navigation, text="OPERATIONS / \u0627\u0644\u0639\u0645\u0644\u064a\u0627\u062a").pack(anchor="w", pady=(0, 10))
+    category = tk.StringVar(value=OPERATION_GROUPS["auto-run"])
+    category_picker = ttk.Combobox(navigation, textvariable=category,
+                                   values=list(dict.fromkeys(OPERATION_GROUPS.values())),
+                                   state="readonly", width=23)
+    category_picker.pack(fill="x", pady=(0, 8))
     selector = tk.Listbox(navigation, bg="#121f33", fg="#dce7f5", selectbackground="#246b69",
                           relief="flat", width=24, height=19, exportselection=False)
     selector.pack(fill="y")
     names = list(commands)
-    for name in names:
-        selector.insert("end", name)
+    visible_names = []
+    display_names = {name: OPERATION_LABELS.get(name, name.replace("-", " ").title()) for name in names}
+    def refresh_operations(*_):
+        visible_names[:] = [name for name in names if OPERATION_GROUPS.get(name, "Tools and setup") == category.get()]
+        selector.delete(0, "end")
+        for name in visible_names:
+            selector.insert("end", display_names[name])
+        if visible_names:
+            default_name = "auto-run" if "auto-run" in visible_names else visible_names[0]
+            selector.selection_set(visible_names.index(default_name))
+            show_form(default_name)
+    category_picker.bind("<<ComboboxSelected>>", refresh_operations)
     main = ttk.Frame(body)
     main.pack(side="left", fill="both", expand=True)
     heading = ttk.Label(main, text="", font=("Segoe UI", 15, "bold"))
     heading.pack(anchor="w", pady=(0, 10))
+    description = ttk.Label(main, text="", wraplength=850, justify="left")
+    description.pack(anchor="w", pady=(0, 9))
     notebook = ttk.Notebook(main)
     notebook.pack(fill="both", expand=True)
     form_tab, output_tab, report_tab = (ttk.Frame(notebook, padding=12) for _ in range(3))
@@ -158,7 +235,8 @@ def launch_desktop(parser):
             form_values[selected.get()] = {action.dest: variable.get() for action, flag, variable, required in fields}
         selected.set(name)
         saved = form_values.get(name, {})
-        heading.configure(text=name)
+        heading.configure(text=display_names.get(name, name.replace("-", " ").title()))
+        description.configure(text=OPERATION_DESCRIPTIONS.get(name, "Use the fields below to run this local CLI operation."))
         for child in form.winfo_children():
             child.destroy()
         fields.clear()
@@ -169,10 +247,13 @@ def launch_desktop(parser):
             line.pack(fill="x")
             flag = next((item for item in action.option_strings if item.startswith("--")), None)
             required = action.required or not action.option_strings
-            ttk.Label(line, text=(flag or action.dest) + (" *" if required else ""), width=23).pack(side="left")
+            is_toggle = isinstance(action, argparse._StoreTrueAction)
+            label = FIELD_LABELS.get(action.dest, (flag or action.dest).replace("-", " ").replace("_", " ").title())
+            ttk.Label(line, text="" if is_toggle else label + (" *" if required else ""),
+                      width=29, wraplength=210).pack(side="left")
             if isinstance(action, argparse._StoreTrueAction):
                 variable = tk.BooleanVar(value=saved.get(action.dest, bool(action.default)))
-                ttk.Checkbutton(line, variable=variable, text=action.help or action.dest).pack(side="left")
+                ttk.Checkbutton(line, variable=variable, text=FIELD_LABELS.get(action.dest, action.help or action.dest)).pack(side="left")
             else:
                 default = "" if action.default is None else str(action.default)
                 variable = tk.StringVar(value=saved.get(action.dest, default))
@@ -193,15 +274,16 @@ def launch_desktop(parser):
                         kind = "file"
                     if kind:
                         ttk.Button(line, text="Browse", command=lambda value=variable, mode=kind: browse(value, mode)).pack(side="left", padx=4)
-                if action.help:
-                    ttk.Label(form, text=action.help, wraplength=700).pack(anchor="w", padx=23)
+                help_text = FIELD_HELP.get(action.dest, action.help)
+                if help_text:
+                    ttk.Label(form, text=help_text, wraplength=700).pack(anchor="w", padx=29)
             fields.append((action, flag, variable, required))
         canvas.yview_moveto(0)
 
     def on_select(event):
         selection = selector.curselection()
         if selection:
-            show_form(names[selection[0]])
+            show_form(visible_names[selection[0]])
     selector.bind("<<ListboxSelect>>", on_select)
 
     def command():
@@ -370,8 +452,7 @@ def launch_desktop(parser):
         else:
             window.destroy()
     window.protocol("WM_DELETE_WINDOW", close)
-    selector.selection_set(names.index("auto-run"))
-    show_form("auto-run")
+    refresh_operations()
     window.after(150, poll)
     window.mainloop()
     return 0

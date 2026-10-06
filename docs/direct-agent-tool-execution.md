@@ -56,7 +56,10 @@ file; duplicate fields/nonfinite constants are rejected. Existing per-round
 request/target/origin and tool process timeout/output limits still apply.
 
 Supported adapters include httpx, katana, nuclei, dalfox, ZAP baseline, nmap,
-ffuf and the other router tools. Processes execute through argument arrays and
+sslscan, ffuf and the other router tools. sslscan is limited to HTTPS origins
+already in scope and receives a fixed host/port argument; HTTP URLs are filtered.
+It adds local TLS configuration/certificate output, not application exploit proof.
+Processes execute through argument arrays and
 the process-tree runtime, not a shell interpreter. Missing installations,
 nonzero exit codes, launch failures, timeouts and output limits remain explicit.
 The router is not an unrestricted interactive terminal, does not install tools,

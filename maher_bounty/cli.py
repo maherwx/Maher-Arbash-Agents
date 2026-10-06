@@ -20,7 +20,7 @@ def doctor():
     tools = [
         "python3", "git", "go", "cargo", "node", "npm",
         "subfinder", "httpx", "dnsx", "naabu", "katana", "nuclei",
-        "tlsx", "alterx", "assetfinder", "waybackurls", "gau", "hakrawler",
+        "tlsx", "sslscan", "alterx", "assetfinder", "waybackurls", "gau", "hakrawler",
         "dalfox", "nmap", "ffuf", "gobuster", "whatweb", "wafw00f", "nikto",
     ]
     rows = [{"tool": t, "path": shutil.which(t), "available": bool(shutil.which(t))} for t in tools]

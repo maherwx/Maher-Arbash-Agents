@@ -18,7 +18,7 @@ from .browser_xss import run_browser_xss
 # executable paths, arbitrary flags, payloads, or new target hosts.
 SUPPORTED_AGENT_TOOLS = {
     "browser-xss", "browser-xss-auth",
-    "hakrawler", "katana", "httpx", "nuclei", "dalfox", "zap-baseline.py",
+    "hakrawler", "katana", "httpx", "nuclei", "dalfox", "zap-baseline.py", "sslscan",
     "nikto", "nmap", "tlsx", "whatweb", "wafw00f", "dnsx", "naabu", "ffuf", "gobuster",
     "subfinder", "assetfinder", "waybackurls", "gau", "alterx",
 }
@@ -28,7 +28,7 @@ MAX_HAKRAWLER_ORIGINS = 2
 MAX_ZAP_ORIGINS = 2
 MAX_FOLLOWUP_ORIGINS = 2
 
-ORIGIN_TOOLS = {"hakrawler", "katana", "nikto", "zap-baseline.py", "whatweb", "wafw00f", "tlsx", "ffuf", "gobuster", "httpx"}
+ORIGIN_TOOLS = {"hakrawler", "katana", "nikto", "zap-baseline.py", "whatweb", "wafw00f", "tlsx", "ffuf", "gobuster", "httpx", "sslscan"}
 HOST_TOOLS = {"nmap", "naabu", "dnsx", "subfinder", "assetfinder", "waybackurls", "gau", "alterx"}
 
 
@@ -247,6 +247,7 @@ def build_local_tool_requests(
         "alterx": origin_urls,
         "nmap": origin_urls,
         "tlsx": [url for url in origin_urls if urlparse(url).scheme.lower() == "https"],
+        "sslscan": [url for url in origin_urls if urlparse(url).scheme.lower() == "https"],
         "whatweb": origin_urls,
         "wafw00f": origin_urls,
         "nikto": origin_urls,
@@ -267,7 +268,7 @@ def build_local_tool_requests(
     selected_targets = set()
     for tool in (
         "browser-xss-auth", "nuclei", "dalfox", "browser-xss", "katana", "hakrawler", "zap-baseline.py",
-        "naabu", "dnsx", "alterx", "tlsx", "ffuf", "gobuster",
+        "naabu", "dnsx", "alterx", "tlsx", "sslscan", "ffuf", "gobuster",
         "whatweb", "wafw00f", "nikto", "nmap", "httpx",
         "subfinder", "assetfinder", "waybackurls", "gau",
     ):
@@ -373,6 +374,7 @@ def run_agent_tool_requests(
         in_scope, out_scope = filter_in_scope_urls(candidates, scope)
         eligible = []
         postponed = []
+        unsupported_scheme_count = 0
         capacity = MAX_AGENT_TARGETS if tool in {"httpx", "nuclei", "dalfox"} else MAX_FOLLOWUP_ORIGINS
         for url in in_scope:
             if url not in known:
@@ -383,6 +385,9 @@ def run_agent_tool_requests(
             if tool == "browser-xss-auth" and _origin(url) != _origin(browser_xss_profile["identity"]["origin"]):
                 continue
             if tool == "tlsx" and parsed.scheme.lower() != "https":
+                continue
+            if tool == "sslscan" and parsed.scheme.lower() != "https":
+                unsupported_scheme_count += 1
                 continue
             coverage_key = _coverage_key(tool, url)
             if coverage_key and coverage_key in covered[tool]:
@@ -403,12 +408,13 @@ def run_agent_tool_requests(
                 "tool": tool, "targets": postponed, "reason": "deferred by round execution budget"}]})
             decisions.append({"agent": row.get("agent"), "tool": tool, "status": "deferred",
                               "target_count": len(postponed), "reason": "round_execution_budget"})
-        if unknown_ref_count or out_scope or any(value not in known for value in candidates if value not in out_scope):
+        if unknown_ref_count or out_scope or unsupported_scheme_count or any(value not in known for value in candidates if value not in out_scope):
             decisions.append({
                 "agent": row.get("agent"), "tool": tool, "status": "filtered",
                 "out_of_scope_count": len(out_scope),
                 "unknown_url_count": sum(1 for value in candidates if value not in known and value not in out_scope),
                 "unknown_target_ref_count": unknown_ref_count,
+                "unsupported_scheme_count": unsupported_scheme_count,
             })
         if eligible:
             selected[tool].extend(eligible)
@@ -439,7 +445,7 @@ def run_agent_tool_requests(
 
     # Agents can request deeper, complementary passes from the installed local
     # web toolkit. Each command is selected from fixed argv templates.
-    for tool in ("httpx", "katana", "whatweb", "wafw00f", "nikto", "nmap", "tlsx", "dnsx", "naabu", "subfinder", "assetfinder", "waybackurls", "gau", "alterx"):
+    for tool in ("httpx", "katana", "whatweb", "wafw00f", "nikto", "nmap", "tlsx", "sslscan", "dnsx", "naabu", "subfinder", "assetfinder", "waybackurls", "gau", "alterx"):
         targets = []
         seen_keys = set()
         for url in selected[tool]:
@@ -559,6 +565,12 @@ def run_agent_tool_requests(
             elif tool == "nmap":
                 hostname = (urlparse(scan_url).hostname or "").lower()
                 command = [tool, "-sV", "-Pn", "--top-ports", "100", hostname]
+            elif tool == "sslscan":
+                parsed = urlparse(scan_url)
+                hostname = parsed.hostname or ""
+                if ":" in hostname and not hostname.startswith("["):
+                    hostname = f"[{hostname}]"
+                command = [tool, "--no-colour", f"{hostname}:{parsed.port or 443}"]
             else:  # TLSX; URL scope and HTTPS scheme are checked above.
                 command = [tool, "-u", scan_url, "-silent", "-json"]
             result = _exec(command, timeout=300)
