@@ -55,7 +55,7 @@ FIELD_LABELS = {
     "target": "\u0631\u0627\u0628\u0637 \u0627\u0644\u0645\u0648\u0642\u0639 \u0627\u0644\u0645\u0635\u0631\u0651\u062d", "targets": "\u0645\u0644\u0641 \u0631\u0648\u0627\u0628\u0637 \u0627\u0644\u0623\u0647\u062f\u0627\u0641",
     "scope": "\u0645\u0644\u0641 \u0627\u0644\u0646\u0637\u0627\u0642 \u0627\u0644\u0645\u0633\u0645\u0648\u062d", "rules": "\u0645\u0644\u0641 \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0641\u062d\u0635",
     "authorized": "\u0644\u062f\u064a \u0625\u0630\u0646 \u0644\u0641\u062d\u0635 \u0647\u0630\u0627 \u0627\u0644\u0646\u0637\u0627\u0642",
-    "traffic": "\u0645\u0644\u0641 \u062a\u0635\u062f\u064a\u0631 Burp/ZAP", "workflow_manifest": "\u0645\u0644\u0641 \u062e\u0637\u0648\u0627\u062a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631",
+    "traffic": "ملف مرور اختياري (Burp XML / ZAP HAR)", "workflow_manifest": "\u0645\u0644\u0641 \u062e\u0637\u0648\u0627\u062a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631",
     "manifest": "\u0645\u0644\u0641 \u062d\u0627\u0644\u0627\u062a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631", "source_dir": "\u0645\u062c\u0644\u062f \u0627\u0644\u0643\u0648\u062f \u0627\u0644\u0645\u062d\u0644\u064a",
     "api_contract": "\u0645\u0644\u0641 OpenAPI \u0645\u062d\u0644\u064a", "out": "\u0645\u0643\u0627\u0646 \u062d\u0641\u0638 \u0627\u0644\u0646\u062a\u0627\u0626\u062c",
     "rounds": "\u0623\u0642\u0635\u0649 \u0639\u062f\u062f \u0644\u0644\u062c\u0648\u0644\u0627\u062a", "requests": "\u0645\u0644\u0641 \u0637\u0644\u0628\u0627\u062a \u0623\u062f\u0648\u0627\u062a \u0627\u062e\u062a\u064a\u0627\u0631\u064a",
@@ -67,7 +67,7 @@ FIELD_HELP = {
     "target": "\u0623\u062f\u062e\u0644 \u0631\u0627\u0628\u0637 HTTP/HTTPS \u0648\u0627\u062d\u062f\u064b\u0627 \u0636\u0645\u0646 \u0645\u0644\u0641 \u0627\u0644\u0646\u0637\u0627\u0642. \u0644\u062a\u0634\u063a\u064a\u0644 \u0639\u062f\u0629 \u0631\u0648\u0627\u0628\u0637\u060c \u0627\u0633\u062a\u062e\u062f\u0645 --targets \u0645\u0646 CLI.",
     "scope": "\u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0646\u0637\u0627\u0642 \u062a\u062d\u062f\u062f \u0645\u0627 \u064a\u0633\u0645\u062d \u0644\u0644\u0648\u0643\u0644\u0627\u0621 \u0628\u0641\u062d\u0635\u0647.",
     "authorized": "\u064a\u062c\u0628 \u0645\u0644\u0643\u064a\u0629 \u0627\u0644\u0647\u062f\u0641 \u0623\u0648 \u0648\u062c\u0648\u062f \u0625\u0630\u0646 \u0648\u0627\u0636\u062d \u0642\u0628\u0644 \u0627\u0644\u062a\u0646\u0641\u064a\u0630.",
-    "traffic": "\u0627\u062e\u062a\u0631 Burp XML \u0623\u0648 HAR \u0645\u0635\u062f\u0651\u0631\u064b\u0627 \u0645\u0646 ZAP. \u062a\u064f\u0633\u062a\u062e\u062f\u0645 \u0631\u0648\u0627\u0628\u0637 \u0645\u0639\u0631\u0648\u0641\u0629 \u0648\u0645\u0637\u0627\u0628\u0642\u0629 \u0644\u0644\u0646\u0637\u0627\u0642\u060c \u0648\u0644\u0627 \u064a\u064f\u0634\u063a\u0651\u0644 Burp \u0623\u0648 ZAP \u0645\u0646 \u0627\u0644\u0636\u0648\u0627\u0628\u0637.",
+    "traffic": "اختياري: اتركه فارغًا لفحص الرابط فقط. استخدمه فقط إذا كان لديك تصدير محفوظ مسبقًا: Burp XML أو ZAP HAR. يستخرج روابط فقط، ولا ينقل بيانات الدخول.",
     "workflow_manifest": "\u0645\u0644\u0641 JSON \u064a\u0635\u0641 \u0627\u0644\u0647\u0648\u064a\u0627\u062a \u0648\u062e\u0637\u0648\u0627\u062a \u0627\u0644\u0641\u062d\u0635 \u0627\u0644\u0645\u0635\u0631\u0651\u062d\u0629.",
     "api_contract": "\u0645\u0644\u0641 OpenAPI \u0645\u062d\u0644\u064a \u0644\u0645\u0631\u0627\u062c\u0639\u0629 \u0639\u0642\u062f API.",
     "source_dir": "\u0645\u062c\u0644\u062f \u0645\u0635\u062f\u0631 \u0645\u062d\u0644\u064a \u0644\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0643\u0648\u062f.",
@@ -333,14 +333,14 @@ def launch_desktop(parser):
                                          "api_contract", "path", "manifest", "targets", "requests"}:
                         kind = "file"
                     if kind:
-                        button_text = "\u0627\u062e\u062a\u064a\u0627\u0631 \u0645\u0644\u0641 Burp/ZAP" if action.dest == "traffic" else "Browse"
+                        button_text = "اختر ملفًا (اختياري)" if action.dest == "traffic" else "Browse"
                         ttk.Button(line, text=button_text, command=lambda value=variable, mode=kind: browse(value, mode)).pack(side="left", padx=4)
                 help_text = FIELD_HELP.get(action.dest, action.help)
                 if help_text:
                     ttk.Label(form, text=help_text, wraplength=700).pack(anchor="w", padx=29)
             fields.append((action, flag, variable, required))
         if name == "agent-tools-run":
-            note = ttk.Label(form, text="Burp Suite: \u0627\u062e\u062a\u0631 \u0645\u0644\u0641 Burp XML \u0623\u0648 ZAP HAR \u0647\u0646\u0627\u061b Maher \u064a\u0633\u062a\u0648\u0631\u062f \u0627\u0644\u0645\u0631\u0648\u0631 \u0648\u0644\u0627 \u064a\u0634\u063a\u0651\u0644 Burp \u0623\u0648 ZAP.",
+            note = ttk.Label(form, text="لا تحتاج ملفًا للفحص العادي: أدخل الرابط وملف النطاق فقط. ملف Burp XML أو ZAP HAR مطلوب فقط لاستيراد تصدير محفوظ من قبل.",
                              wraplength=730, justify="left")
             note.pack(anchor="w", pady=(3, 8))
         if name == "agent-tools-run":
