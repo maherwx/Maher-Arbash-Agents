@@ -54,8 +54,40 @@ it does not certify the endpoint or all resolvers as secure.
 Proofs require non-null scalar `json_equals` values below `/data/`, preferably
 resource and owner identifiers. This enforces a positive field proof but cannot
 determine whether the user-supplied marker is specific enough or the declared
-access policy is correct. GraphQL negative controls are unsupported in this
-version. Generic access cases retain their GET/HEAD method restriction.
+access policy is correct. Generic access cases retain their GET/HEAD method restriction.
+
+An optional `negative_control` can test whether the positive proof distinguishes
+two supplied resources. It must use the exact same query, endpoint and operation
+name, with different variables selecting another known accessible test object:
+
+```json
+"negative_control": {
+  "request": {
+    "url": "https://your-authorized-app.example/graphql",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "query": "query OrderProof($id: ID!) { privateOrder: order(id: $id) { ...OrderIdentity } } fragment OrderIdentity on Order { id ownerId }",
+      "operationName": "OrderProof",
+      "variables": {"id": "supplied-other-accessible-test-id"}
+    }
+  }
+}
+```
+
+Each allowed identity runs this control twice after its positive baselines.
+It must return a complete HTTP 200 GraphQL response with non-null scalar values
+at every positive-proof pointer, while failing the combined `json_equals` resource proof.
+Additional text/status/header assertion failures do not count as different resources.
+If the proof also matches the control, the case stops before denied comparisons.
+Null, missing fields, error-only JSON or incomplete transport are inconclusive;
+they cannot substitute for a real comparison resource. Different variables
+alone do not establish a different object: the user must supply an appropriate
+control and sufficiently specific proof. No IDs or control queries are generated.
+The normalized negative-control body hash is retained without its variables.
+These requests consume the same shared budget. The native evidence reviewer
+continues to use the executor's specificity decision; no independent discovery
+of resource identity or application policy is claimed.
 
 The body accepts `query`, `variables` and `operationName` only. Arrays/batching,
 persisted-query extensions, schema definitions, mutations and subscriptions

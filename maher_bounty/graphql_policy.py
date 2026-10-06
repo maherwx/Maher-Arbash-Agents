@@ -115,8 +115,6 @@ def graphql_request_metadata(request):
 def validate_graphql_case(case, engine):
     if engine != "http":
         raise ValueError("GraphQL access cases require engine=http")
-    if "negative_control" in case:
-        raise ValueError("GraphQL negative controls are not supported")
     request = case.get("request", {})
     if not isinstance(request, dict):
         raise ValueError("GraphQL request must be an object")
@@ -129,7 +127,28 @@ def validate_graphql_case(case, engine):
                         or expected is None or isinstance(expected, (dict, list))
                         for pointer, expected in proof.items()):
         raise ValueError("GraphQL proof requires non-null scalar json_equals fields below /data/")
-    return graphql_request_metadata(request)
+    metadata = graphql_request_metadata(request)
+    if "negative_control" in case:
+        control = case["negative_control"]
+        if not isinstance(control, dict) or set(control) != {"request"} or not isinstance(control["request"], dict):
+            raise ValueError("GraphQL negative_control requires exactly one request object")
+        negative = control["request"]
+        if negative.get("browser"):
+            raise ValueError("GraphQL negative controls cannot contain browser settings")
+        negative_metadata = graphql_request_metadata(negative)
+        if negative.get("url") != request.get("url") or negative_metadata["query_sha256"] != metadata["query_sha256"]:
+            raise ValueError("GraphQL negative control must use the same endpoint and query")
+        if negative["body"].get("operationName") != request["body"].get("operationName"):
+            raise ValueError("GraphQL negative control must select the same operation")
+        try:
+            original_variables = json.dumps(request["body"].get("variables", {}), sort_keys=True, allow_nan=False)
+            negative_variables = json.dumps(negative["body"].get("variables", {}), sort_keys=True, allow_nan=False)
+        except (ValueError, TypeError, RecursionError) as exc:
+            raise ValueError("GraphQL control variables require comparable JSON objects") from exc
+        if original_variables == negative_variables:
+            raise ValueError("GraphQL negative control requires distinct supplied variables")
+        metadata["negative_control_body_sha256"] = negative_metadata["request_body_sha256"]
+    return metadata
 
 
 def graphql_envelope_valid(document):

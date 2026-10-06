@@ -444,11 +444,12 @@ def validate_manifest(manifest, scope):
             if not isinstance(negative, dict) or set(negative) != {"request"} or not isinstance(negative["request"], dict):
                 raise ValueError("negative_control requires exactly one request object")
             negative_request = negative["request"]
-            if negative_request.get("url") == request.get("url"):
-                raise ValueError("negative control requires a distinct supplied resource URL")
-            method = negative_request.get("method", "GET")
-            if not isinstance(method, str) or method.upper() not in {"GET", "HEAD"} or "body" in negative_request:
-                raise ValueError("negative control requires a read-only request without a body")
+            if not case.get("graphql"):
+                if negative_request.get("url") == request.get("url"):
+                    raise ValueError("negative control requires a distinct supplied resource URL")
+                method = negative_request.get("method", "GET")
+                if not isinstance(method, str) or method.upper() not in {"GET", "HEAD"} or "body" in negative_request:
+                    raise ValueError("negative control requires a read-only request without a body")
             _validate_browser_settings(negative_request.get("browser", {}))
             if negative_request.get("browser", {}).get("actions"):
                 raise ValueError("negative control cannot repeat browser actions")
@@ -755,15 +756,33 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
                 # Use only positive content fields to test specificity. A status,
                 # absence or numeric-bound failure must not hide a matching ID.
                 content_proof = {key: case["proof"][key] for key in ("contains", "json_equals") if case["proof"].get(key)}
+                if case.get("graphql"):
+                    # A differing error/message string must not hide matching
+                    # resource fields in the negative control.
+                    content_proof = {"json_equals": case["proof"]["json_equals"]}
                 for name in case["allowed"]:
                     for repeat in range(2):
                         response = send(name, case["negative_control"]["request"])
                         checks = _assertions(response, content_proof)
                         matches = bool(checks) and all(c["passed"] for c in checks)
+                        if case.get("graphql"):
+                            control_valid = False
+                            try:
+                                document = _decode_json(response["body"])
+                                # A null/error-only/missing-field response cannot show
+                                # that the resource proof distinguishes real objects.
+                                values = [_pointer_value(document, pointer) for pointer in content_proof["json_equals"]]
+                                control_valid = graphql_envelope_valid(document) and all(
+                                    value is not None and not isinstance(value, (dict, list)) for value in values)
+                            except (ValueError, TypeError, KeyError, IndexError, RecursionError):
+                                pass
+                            checks.append({"kind": "graphql_negative_resource", "passed": control_valid,
+                                           "evidence_complete": control_valid})
                         rows.append({"identity": name, "role": "negative_control", "repeat": repeat,
                                      **_observation(response, checks), "resource_proof_passed": matches})
                         if (response["status"] != 200 or response.get("truncated")
-                                or response.get("network_incomplete")):
+                                or response.get("network_incomplete")
+                                or any(check.get("evidence_complete") is False for check in checks)):
                             raise RuntimeError("incomplete negative control evidence")
                         if content_proof.get("json_equals"):
                             # Invalid JSON is not evidence of a different object.
