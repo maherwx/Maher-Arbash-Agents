@@ -268,7 +268,10 @@ def build_local_tool_requests(
         "waybackurls": origin_urls,
         "gau": origin_urls,
     }
-    enabled_tools = DIRECT_AGENT_TOOLS if enabled_tools is None else set(enabled_tools) & DIRECT_AGENT_TOOLS
+    eligible_tools = set(DIRECT_AGENT_TOOLS)
+    if browser_xss_profile is not None:
+        eligible_tools.add("browser-xss-auth")
+    enabled_tools = eligible_tools if enabled_tools is None else set(enabled_tools) & eligible_tools
     available_tools = None if available_tools is None else set(available_tools)
     # Choose one content-discovery engine to avoid duplicate wordlist traffic.
     if available_tools is None:

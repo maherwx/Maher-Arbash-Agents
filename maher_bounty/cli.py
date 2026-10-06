@@ -105,6 +105,7 @@ def build_parser():
     terminal.add_argument("--rounds", type=int, choices=[1, 2, 3], default=3)
     terminal.add_argument("--tool-profile", choices=["all", "web", "discovery", "network"], default="all",
                           help="Restrict fixed local adapters to all, web, discovery, or network/TLS tools")
+    terminal.add_argument("--workflow-manifest", help="Local manifest with an explicit browser identity profile for authenticated checks")
     terminal.add_argument("--out", default="results/agent-tools")
 
     inv = s.add_parser("inventory", help="Normalize and deduplicate collected recon data")
@@ -159,7 +160,8 @@ def _main():
         result = run_agent_terminal(load_execution_json(a.targets), load_execution_json(a.scope), a.out,
             authorized=a.authorized, requests=load_execution_json(a.requests) if a.requests else None,
             local_model=a.local_model, plan_only=a.plan_only, max_rounds=a.rounds, resume=a.resume,
-            tool_profile=a.tool_profile)
+            tool_profile=a.tool_profile,
+            workflow_manifest=load_execution_json(a.workflow_manifest) if a.workflow_manifest else None)
         print(json.dumps({"status": result["status"], "run_status_counts": result.get("run_status_counts", {}),
                           "execution_resumed": result.get("execution_resumed", False),
                           "execution_outcome": result.get("execution_outcome"),

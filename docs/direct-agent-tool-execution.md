@@ -16,6 +16,25 @@ maher-bounty agent-tools-run --targets targets.json --scope scope.json --authori
 maher-bounty agent-tools-run --targets targets.json --scope scope.json --authorized --rounds 3 --out results/tools
 ```
 
+For the fixed authenticated browser verifier, supply a valid local workflow
+manifest containing an explicit `browser_xss_profile` (identity, session control,
+and positive account-specific proof) and choose the `web` or `all` tool profile:
+
+```sh
+maher-bounty agent-tools-run --targets targets.json --scope scope.json --authorized \
+  --workflow-manifest access-workflow.json --tool-profile web --plan-only --out results/auth-plan
+```
+
+The manifest's access/workflow cases are validated as input but are not executed
+by `agent-tools-run`; use `workflow-run` or `policy-agents-run` to execute those
+declared cases. The profile only authorizes the existing bounded browser check
+for exact supplied in-scope query URLs at that identity's origin. Credentials
+must already be provided through the manifest's local environment-variable or
+storage-state reference. The browser package must be present at preflight; actual
+browser installation and launch remain runtime checks. The local agent cannot
+choose an identity, login action, credential, browser script, executable path,
+or free-form shell command.
+
 The default is native fixed planning. For local model reasoning, install the
 optional `local-inference` dependency and supply an already downloaded compatible
 GGUF file. Nothing downloads a model or calls an external/local HTTP model API:

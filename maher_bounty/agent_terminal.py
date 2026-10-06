@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from .agent_feedback import run_agent_tool_feedback
 from .agent_tool_router import (build_local_tool_requests, SUPPORTED_AGENT_TOOLS,
-                                DIRECT_AGENT_TOOLS, AGENT_TOOL_PROFILES)
+                                DIRECT_AGENT_TOOLS, AGENT_TOOL_PROFILES, _origin)
 from .artifact_io import write_json_atomic
 from .model_adapter import LocalModelAdapter
 from .scope_policy import filter_in_scope_urls
@@ -14,6 +14,8 @@ from .agent_findings_report import write_agent_findings_report, summarize_execut
 from .agent_evidence_review import review_agent_evidence
 from .json_numbers import finite_json_float
 from .tool_readiness import tool_readiness_snapshot, agent_tool_availability_context
+from .workflow_execution import validate_manifest
+from .browser_xss import load_browser_xss_profile
 
 
 class AgentExecutionInputError(ValueError):
@@ -45,7 +47,7 @@ def load_execution_json(path):
         raise AgentExecutionInputError("cannot read valid local execution JSON") from None
 
 
-def _validate_packets(packets, known):
+def _validate_packets(packets, known, browser_xss_profile=None, allowed_tools=None):
     if not isinstance(packets, list) or len(packets) > 120:
         raise AgentExecutionInputError("requests must contain at most 120 worker packets")
     for packet in packets:
@@ -59,20 +61,30 @@ def _validate_packets(packets, known):
         for request in requests:
             if not isinstance(request, dict) or set(request) - {"tool", "targets", "reason"}:
                 raise AgentExecutionInputError("request accepts tool, targets and optional reason only")
-            if (not isinstance(request.get("tool"), str) or request["tool"] not in SUPPORTED_AGENT_TOOLS
-                    or request["tool"] == "browser-xss-auth"):
-                raise AgentExecutionInputError("unsupported direct tool; authenticated browser checks require a workflow profile")
+            if not isinstance(request.get("tool"), str) or request["tool"] not in SUPPORTED_AGENT_TOOLS:
+                raise AgentExecutionInputError("unsupported direct tool")
+            if request["tool"] == "browser-xss-auth" and browser_xss_profile is None:
+                raise AgentExecutionInputError("authenticated browser checks require a supplied workflow profile")
+            if allowed_tools is not None and request["tool"] not in allowed_tools:
+                if request["tool"] == "browser-xss-auth" and browser_xss_profile is not None:
+                    raise AgentExecutionInputError("authenticated browser prerequisites or selected profile are unavailable")
+                raise AgentExecutionInputError("requested tool is outside the selected tool profile")
             targets = request.get("targets")
             if (not isinstance(targets, list) or not targets or len(targets) > 120
                     or any(not isinstance(url, str) or url not in known for url in targets)):
                 raise AgentExecutionInputError("request targets must be exact supplied scoped URLs")
+            if request["tool"] == "browser-xss-auth" and any(
+                    not urlparse(url).query
+                    or _origin(url) != _origin(browser_xss_profile["identity"]["origin"])
+                    for url in targets):
+                raise AgentExecutionInputError("authenticated browser targets must be query URLs at the supplied identity origin")
             if "reason" in request and (not isinstance(request["reason"], str) or len(request["reason"]) > 1000):
                 raise AgentExecutionInputError("request reason must be a bounded string")
 
 
 def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=None,
                        local_model=False, plan_only=False, max_rounds=3, resume=False,
-                       tool_profile="all"):
+                       tool_profile="all", workflow_manifest=None):
     if not authorized:
         raise AgentExecutionInputError("agent tool execution requires explicit authorization")
     if type(resume) is not bool or (resume and (local_model or plan_only)):
@@ -100,8 +112,15 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
     if rejected or not known:
         raise AgentExecutionInputError("all initial targets must be explicitly in scope")
     known = list(dict.fromkeys(known))
-    if requests is not None:
-        _validate_packets(requests, set(known))
+    browser_xss_profile = None
+    if workflow_manifest is not None:
+        try:
+            validate_manifest(workflow_manifest, scope)
+            browser_xss_profile = load_browser_xss_profile(workflow_manifest, scope)
+        except Exception:
+            raise AgentExecutionInputError("invalid local authenticated workflow profile") from None
+        if browser_xss_profile is None:
+            raise AgentExecutionInputError("workflow manifest must contain browser_xss_profile")
     root = Path(out_dir)
     checkpoint = root / "execution" / "execution-state.json"
     if resume and not checkpoint.is_file():
@@ -114,8 +133,14 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         raise AgentExecutionInputError("local GGUF model unavailable; configure MAHER_GGUF_MODEL and local-inference")
     allowed_tools = set(AGENT_TOOL_PROFILES[tool_profile])
     readiness = tool_readiness_snapshot()
-    availability_context = agent_tool_availability_context(readiness, allowed_tools, tool_profile)
     available_tools = {row["tool"] for row in readiness["tools"] if row.get("available") is True}
+    if browser_xss_profile is not None and "browser-xss" in available_tools and tool_profile in {"all", "web"}:
+        allowed_tools.add("browser-xss-auth")
+        available_tools.add("browser-xss-auth")
+    if requests is not None:
+        _validate_packets(requests, set(known), browser_xss_profile, allowed_tools)
+    availability_context = agent_tool_availability_context(
+        readiness, allowed_tools, tool_profile, browser_xss_profile=browser_xss_profile is not None)
     roles = [
         {"id": "web_surface_reviewer", "mission": "Plan complementary scoped local tool checks from observed web evidence."},
         {"id": "evidence_reviewer", "mission": "Review actual execution failures and findings; distinguish candidates from proof."},
@@ -139,7 +164,8 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         return outputs
 
     native = build_local_tool_requests(known, scope=scope, enabled_tools=allowed_tools,
-                                       available_tools=available_tools)
+                                       available_tools=available_tools,
+                                       browser_xss_profile=browser_xss_profile)
     packets = list(requests) if requests is not None else list(native["agent_results"])
     if model is not None:
         packets = [*analyze({"round": 0, "known_urls": known, "runs": [], "findings": [],
@@ -147,10 +173,13 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
     plan = {"mode": "local_gguf_plus_native" if model else "native_fixed_planner",
             "model_inference_enabled": model is not None, "initial_targets": known,
             "initial_requests": packets, "max_rounds": max_rounds,
-            "execution_policy": {"supported_tools": sorted(DIRECT_AGENT_TOOLS),
+            "execution_policy": {"supported_tools": sorted(DIRECT_AGENT_TOOLS |
+                                                       ({"browser-xss-auth"} if "browser-xss-auth" in allowed_tools else set())),
                                  "selected_profile": tool_profile,
                                  "selected_tools": sorted(allowed_tools),
-                                 "arbitrary_shell_commands": False, "agent_selected_executable_paths": False},
+                                 "arbitrary_shell_commands": False, "agent_selected_executable_paths": False,
+                                 "authenticated_profile_sha256": (browser_xss_profile.get("profile_sha256")
+                                     if browser_xss_profile else None)},
             "tool_readiness": readiness,
             "plan_only": plan_only, "execution_started": False}
     # Preserve the original plan on recovery, including if binding validation
@@ -164,8 +193,11 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
             max_rounds=max_rounds, reviewer=analyze if model else None,
             checkpoint_path=checkpoint, resume=resume,
             checkpoint_context={"mode": plan["mode"], "initial_requests": packets,
-                                "tool_profile": tool_profile, "selected_tools": sorted(allowed_tools)},
-            allowed_tools=allowed_tools, available_tools=available_tools)
+                                "tool_profile": tool_profile, "selected_tools": sorted(allowed_tools),
+                                "authenticated_profile_sha256": (browser_xss_profile.get("profile_sha256")
+                                    if browser_xss_profile else None)},
+            allowed_tools=allowed_tools, available_tools=available_tools,
+            browser_xss_profile=browser_xss_profile)
     except ValueError:
         if not resume:
             raise

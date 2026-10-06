@@ -54,7 +54,7 @@ def tool_readiness_snapshot():
             "tools": rows}
 
 
-def agent_tool_availability_context(snapshot, selected_tools, profile):
+def agent_tool_availability_context(snapshot, selected_tools, profile, *, browser_xss_profile=False):
     """Build conservative model context without promoting packages to ready tools."""
     selected = set(selected_tools)
     rows = [row for row in snapshot.get("tools", [])
@@ -62,12 +62,17 @@ def agent_tool_availability_context(snapshot, selected_tools, profile):
     executable_on_path = sorted(row["tool"] for row in rows if row.get("status") == "available")
     prerequisite_present = sorted(row["tool"] for row in rows
                                   if row.get("available") is True and row.get("status") != "available")
-    unverified = sorted(row["tool"] for row in rows if row.get("status") != "available")
+    workflow_eligible = (browser_xss_profile and "browser-xss-auth" in selected
+                         and "browser-xss" in prerequisite_present)
+    workflow_unverified = ["browser-xss-auth"] if workflow_eligible else []
+    unverified = sorted(row["tool"] for row in rows
+                        if row.get("status") != "available" and row.get("tool") not in workflow_unverified)
     return {
         "selected_profile": profile,
         "selected_tools": sorted(selected),
         "executable_on_path": executable_on_path,
         "prerequisite_present_but_unverified": prerequisite_present,
+        "workflow_eligible_but_runtime_unverified": workflow_unverified,
         "unavailable_or_unverified": unverified,
         "basis": "PATH and Python package metadata only; commands and browsers are not launched",
     }

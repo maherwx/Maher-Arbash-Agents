@@ -16,6 +16,13 @@ to the existing workflow manifest passed with `--workflow-manifest`:
 }
 ```
 
+The direct local-tool command also accepts `--workflow-manifest` with this
+profile. Select `--tool-profile web` or `all`; the adapter is proposed only when
+the local Playwright package prerequisite is present, and remains browser-runtime
+unverified until an authorized run. In `agent-tools-run`, the manifest's policy
+cases are validated but not executed; run `workflow-run` or `policy-agents-run`
+separately when those application-specific access checks are intended.
+
 The manifest must already contain that identity and at least one valid access
 case, state case or workflow. `owner` needs supplied `headers_env` credentials or a private
 Playwright `storage_state` file. Environment names and storage paths refer to
