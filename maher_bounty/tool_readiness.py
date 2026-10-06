@@ -52,3 +52,22 @@ def tool_readiness_snapshot():
     return {"source": "local_PATH_and_Python_package_metadata", "commands_launched": False,
             "available_count": sum(row["available"] for row in rows), "total_count": len(rows),
             "tools": rows}
+
+
+def agent_tool_availability_context(snapshot, selected_tools, profile):
+    """Build conservative model context without promoting packages to ready tools."""
+    selected = set(selected_tools)
+    rows = [row for row in snapshot.get("tools", [])
+            if isinstance(row, dict) and row.get("tool") in selected]
+    executable_on_path = sorted(row["tool"] for row in rows if row.get("status") == "available")
+    prerequisite_present = sorted(row["tool"] for row in rows
+                                  if row.get("available") is True and row.get("status") != "available")
+    unverified = sorted(row["tool"] for row in rows if row.get("status") != "available")
+    return {
+        "selected_profile": profile,
+        "selected_tools": sorted(selected),
+        "executable_on_path": executable_on_path,
+        "prerequisite_present_but_unverified": prerequisite_present,
+        "unavailable_or_unverified": unverified,
+        "basis": "PATH and Python package metadata only; commands and browsers are not launched",
+    }

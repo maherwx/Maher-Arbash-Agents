@@ -63,7 +63,9 @@ adapters. The selected profile and a local prerequisite snapshot are recorded
 in `agent-tool-plan.json` and `agent-tool-results.json`. The snapshot only
 checks `PATH` and Playwright package metadata; it does not run tools or verify
 that a browser can launch. Local model reviewers receive this prerequisite
-summary and are instructed to prefer available adapters. It is advisory; the
+summary with PATH-present executables separated from installed-but-unverified
+browser prerequisites. They are instructed to prefer PATH-present adapters.
+The summary is advisory; the
 executor still enforces the selected profile, scope admission, per-tool budgets
 and exact-known-target checks.
 

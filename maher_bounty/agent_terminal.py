@@ -13,7 +13,7 @@ from .scope_policy import filter_in_scope_urls
 from .agent_findings_report import write_agent_findings_report, summarize_execution_outcome
 from .agent_evidence_review import review_agent_evidence
 from .json_numbers import finite_json_float
-from .tool_readiness import tool_readiness_snapshot
+from .tool_readiness import tool_readiness_snapshot, agent_tool_availability_context
 
 
 class AgentExecutionInputError(ValueError):
@@ -114,14 +114,7 @@ def run_agent_terminal(targets, scope, out_dir, *, authorized=False, requests=No
         raise AgentExecutionInputError("local GGUF model unavailable; configure MAHER_GGUF_MODEL and local-inference")
     allowed_tools = set(AGENT_TOOL_PROFILES[tool_profile])
     readiness = tool_readiness_snapshot()
-    selected_readiness = [row for row in readiness["tools"] if row["tool"] in allowed_tools]
-    availability_context = {
-        "selected_profile": tool_profile,
-        "selected_tools": sorted(allowed_tools),
-        "currently_available": sorted(row["tool"] for row in selected_readiness if row["available"]),
-        "unavailable_or_unverified": sorted(row["tool"] for row in selected_readiness if not row["available"]),
-        "basis": "PATH and Python package metadata only; no commands launched",
-    }
+    availability_context = agent_tool_availability_context(readiness, allowed_tools, tool_profile)
     roles = [
         {"id": "web_surface_reviewer", "mission": "Plan complementary scoped local tool checks from observed web evidence."},
         {"id": "evidence_reviewer", "mission": "Review actual execution failures and findings; distinguish candidates from proof."},
