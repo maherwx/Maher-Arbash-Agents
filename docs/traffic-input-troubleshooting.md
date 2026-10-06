@@ -37,3 +37,19 @@ fetches an external DTD or contacts a target.
 
 This change was reviewed from source and diff only. Runtime compatibility and
 limits are unverified; no tests, imports, scans or applications were executed.
+
+Captured HTTP header handling now redacts continuation lines of sensitive
+headers, including obsolete folded Authorization/Cookie/Set-Cookie values.
+Header names are matched after surrounding whitespace is removed; the message
+body and original line endings remain unchanged. This is header redaction,
+not automatic removal of every secret from URLs, bodies or arbitrary headers.
+
+Burp actor extraction unfolds continuation lines before hashing credentials.
+HAR and Burp imports leave actor identity unknown when a credential or explicit
+identity header occurs more than once, instead of choosing an arbitrary last
+value. Multiple recognized session cookies also leave cookie-derived identity
+unknown. An explicit supplied identity header still has the existing precedence
+over cookie/Authorization inference. Hashed capture identity is a correlation
+hint, not proof that the application authenticated that account or granted it
+access. This header handling update remains unverified at runtime and received
+source/diff review only, with no capture import or tests executed.

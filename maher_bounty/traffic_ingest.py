@@ -79,7 +79,7 @@ def _redact_headers(raw: str) -> str:
         try:
             message = json.loads(raw)
             for row in message.get("headers", []):
-                if str(row.get("name", "")).lower() in sensitive:
+                if str(row.get("name", "")).strip().lower() in sensitive:
                     row["value"] = "[redacted]"
             for row in message.get("cookies", []):
                 row["value"] = "[redacted]"
@@ -89,13 +89,36 @@ def _redact_headers(raw: str) -> str:
     boundary = re.search(r"\r?\n\r?\n", raw)
     head = raw[:boundary.start()] if boundary else raw
     tail = raw[boundary.start():] if boundary else ""
-    for name in sensitive:
-        head = re.sub(r"(?im)^(" + re.escape(name) + r":)[^\r\n]*", r"\1 [redacted]", head)
-    return head + tail
+    lines = []
+    redact_continuation = False
+    for line in head.splitlines(keepends=True):
+        ending = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else "\r" if line.endswith("\r") else ""
+        content = line.rstrip("\r\n")
+        if content.startswith((" ", "\t")):
+            lines.append(" [redacted]" + ending if redact_continuation else line)
+            continue
+        name, separator, value = content.partition(":")
+        redact_continuation = bool(separator and name.strip().lower() in sensitive)
+        lines.append(name + ": [redacted]" + ending if redact_continuation else line)
+    return "".join(lines) + tail
 
 
 def _har_headers(req: dict) -> dict[str,str]:
-    return {str(x.get("name") or "").lower():str(x.get("value") or "") for x in req.get("headers",[]) if x.get("name")}
+    return _identity_header_map((str(x.get("name") or ""), str(x.get("value") or ""))
+                                for x in req.get("headers", []) if x.get("name"))
+
+
+def _identity_header_map(pairs) -> dict[str, str]:
+    headers = {}
+    identity_names = {"authorization", "cookie", "x-user-id", "x-identity", "x-session-id"}
+    for name, value in pairs:
+        name = name.strip().lower()
+        if name in identity_names and name in headers:
+            # Duplicate credential/identity headers have server-dependent
+            # semantics. Do not assign an actor using an arbitrary last value.
+            return {}
+        headers[name] = value.strip()
+    return headers
 
 
 def _stable_identity(value: str | None) -> str | None:
@@ -113,9 +136,11 @@ def _identity_from_headers(headers: dict[str, str]) -> str | None:
         r"(?:^|;\s*)(?:__Host-)?(?:session(?:id|[_-]?id)?|sid|jsessionid|phpsessid|asp\.net_sessionid|laravel_session|connect\.sid|rack\.session)=([^;]+)",
         re.I,
     )
-    match = session_cookie.search(cookie)
-    if match:
-        return _stable_identity(match.group(1))
+    matches = session_cookie.findall(cookie)
+    if len(matches) > 1:
+        return None
+    if matches:
+        return _stable_identity(matches[0])
     authorization = headers.get("authorization", "")
     return _stable_identity(authorization) if authorization else None
 
@@ -128,12 +153,17 @@ def _burp_identity(raw: str) -> str | None:
     value = str(raw or "")
     boundary = re.search(r"\r?\n\r?\n", value)
     head = value[:boundary.start()] if boundary else value
-    headers = {}
+    pairs = []
     for line in head.splitlines()[1:]:
+        if line.startswith((" ", "\t")):
+            if pairs:
+                name, item = pairs[-1]
+                pairs[-1] = (name, item + " " + line.strip())
+            continue
         if ":" in line:
             name, item = line.split(":", 1)
-            headers[name.strip().lower()] = item.strip()
-    return _identity_from_headers(headers)
+            pairs.append((name, item))
+    return _identity_from_headers(_identity_header_map(pairs))
 def load_har(path: str | Path) -> list[dict]:
     data = json.loads(_read_export(path).decode("utf-8-sig"),
                       object_pairs_hook=_unique_fields, parse_constant=_invalid_constant)
