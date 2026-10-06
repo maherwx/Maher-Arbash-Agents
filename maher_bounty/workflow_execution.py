@@ -28,6 +28,7 @@ from .burp_evidence import _safe_url
 from .scope_policy import is_in_scope_url
 from .artifact_io import write_json_atomic
 from .response_policy import validate_response_policy, response_policy_assertions
+from .state_integrity import validate_state_cases, execute_state_cases
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -400,8 +401,8 @@ def validate_manifest(manifest, scope):
     identities = manifest.get("identities", {})
     cases = manifest.get("access_cases", [])
     workflows = manifest.get("workflows", [])
-    if not identities or not (cases or workflows):
-        raise ValueError("identities and at least one access case or workflow are required")
+    if not identities or not (cases or workflows or manifest.get("state_cases")):
+        raise ValueError("identities and at least one access case, state case or workflow are required")
     names = set()
     requests = []
     for case in cases:
@@ -436,6 +437,7 @@ def validate_manifest(manifest, scope):
             if negative_request.get("browser", {}).get("actions"):
                 raise ValueError("negative control cannot repeat browser actions")
             requests.extend((negative_request, name) for name in allowed)
+    requests.extend(validate_state_cases(manifest, names))
     for workflow in workflows:
         if workflow.get("id") in names or not isinstance(workflow.get("id"), str):
             raise ValueError("workflow ids must be unique strings")
@@ -779,6 +781,11 @@ def _execute_workflows(manifest, scope, out_dir, *, authorized=False, transport=
             decisions.append({"id": case["id"], "status": "inconclusive", "phase": phase,
                               "error_type": type(exc).__name__})
         observations.append({"id": case["id"], "observations": rows})
+
+    state_evidence = execute_state_cases(manifest.get("state_cases", []), send)
+    findings.extend(state_evidence["findings"])
+    decisions.extend(state_evidence["decisions"])
+    observations.extend(state_evidence["observations"])
 
     for workflow in manifest.get("workflows", []):
         rows = []

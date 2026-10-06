@@ -1,5 +1,8 @@
 # Authenticated access policies and workflow invariants
 
+HTTP manifests can declare [rejected-operation state-integrity cases](rejected-action-state-integrity.md)
+to check stable owner-observed state before and after an explicitly supplied actor action.
+
 Expectations can verify [response headers and cookie attributes](response-security-policies.md)
 alongside body, status and captured-state assertions in both HTTP and browser modes.
 
