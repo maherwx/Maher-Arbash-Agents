@@ -26,10 +26,54 @@ PATTERNS = {
     "dart": ["Process.run($CMD, ...)", "Process.start($CMD, ...)"],
 }
 
+TAINT_RULES = {
+    "javascript": {
+        "sources": ["$REQ.query", "$REQ.params", "$REQ.body"],
+        "sinks": [
+            {"patterns": [{"pattern": "eval($VALUE)"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "$OBJ.innerHTML = $VALUE"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "child_process.exec($VALUE, ...)"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "$DB.query($VALUE, ...)"}, {"focus-metavariable": "$VALUE"}]},
+        ],
+    },
+    "typescript": {
+        "sources": ["$REQ.query", "$REQ.params", "$REQ.body"],
+        "sinks": [
+            {"patterns": [{"pattern": "eval($VALUE)"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "$OBJ.innerHTML = $VALUE"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "child_process.exec($VALUE, ...)"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "$DB.query($VALUE, ...)"}, {"focus-metavariable": "$VALUE"}]},
+        ],
+    },
+    "java": {
+        "sources": ["$REQ.getParameter(...)", "$REQ.getHeader(...)"],
+        "sinks": [
+            {"patterns": [{"pattern": "$STMT.executeQuery($VALUE)"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "$STMT.execute($VALUE)"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "Runtime.getRuntime().exec($VALUE)"}, {"focus-metavariable": "$VALUE"}]},
+        ],
+    },
+    "php": {
+        "sources": ["$_GET[$KEY]", "$_POST[$KEY]", "$_REQUEST[$KEY]"],
+        "sinks": [
+            {"patterns": [{"pattern": "eval($VALUE)"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "shell_exec($VALUE)"}, {"focus-metavariable": "$VALUE"}]},
+            {"patterns": [{"pattern": "$DB->query($VALUE, ...)"}, {"focus-metavariable": "$VALUE"}]},
+        ],
+    },
+}
+
+
+def _rule_languages(files):
+    present = {row.get("language") for row in files if isinstance(row, dict)}
+    return sorted(present & (PATTERNS.keys() | TAINT_RULES.keys()))
+
 
 def _review_semgrep(snapshots, files):
-    languages = sorted({row["language"] for row in files} & PATTERNS.keys())
+    languages = _rule_languages(files)
+    taint_languages = sorted({row["language"] for row in files if isinstance(row, dict)} & TAINT_RULES.keys())
     metadata = {"tool": "semgrep", "mode": "local_ce_rules", "rule_languages": languages,
+                "taint_rule_languages": taint_languages,
                 "status": "not_applicable", "scanned_files": [], "error_count": 0}
     if not languages:
         return metadata, []
@@ -37,13 +81,23 @@ def _review_semgrep(snapshots, files):
     if not binary:
         metadata["status"] = "missing"
         return metadata, []
-    rules, rule_ids = [], set()
+    rules, rule_ids, taint_rule_ids = [], set(), set()
     for language in languages:
-        for index, pattern in enumerate(PATTERNS[language]):
+        for index, pattern in enumerate(PATTERNS.get(language, [])):
             identifier = f"maher-{language}-sensitive-sink-{index}"
             rule_ids.add(identifier)
             rules.append({"id": identifier, "languages": [language], "pattern": pattern,
                           "message": "Sensitive API or sink requires manual input/control review", "severity": "WARNING"})
+        taint_spec = TAINT_RULES.get(language)
+        if taint_spec:
+            identifier = f"maher-{language}-source-to-sink-flow"
+            rule_ids.add(identifier)
+            taint_rule_ids.add(identifier)
+            rules.append({"id": identifier, "languages": [language], "mode": "taint",
+                          "pattern-sources": [{"pattern": pattern} for pattern in taint_spec["sources"]],
+                          "pattern-sinks": taint_spec["sinks"],
+                          "message": "Potential untrusted-data flow into a sensitive sink requires manual review",
+                          "severity": "WARNING"})
     known = {row["path"]: row for row in files}
     with tempfile.TemporaryDirectory(prefix="maher-source-") as directory:
         staging = Path(directory)
@@ -102,11 +156,15 @@ def _review_semgrep(snapshots, files):
                 line = start.get("line") if isinstance(start, dict) else None
                 if relative is None or type(line) is not int or line < 1:
                     continue
+                is_taint_flow = item["check_id"] in taint_rule_ids
                 findings.append({"title": "Sensitive API or sink requires manual input/control review",
                     "file": relative, "file_sha256": known[relative]["sha256"], "line": line,
                     "rule_id": item["check_id"], "source": "local_semgrep_ce", "validated": False,
-                    "status": "needs_review", "confidence": "structural_pattern",
-                    "evidence": "Local parser rule matched a sensitive sink; no input-taint or runtime proof"})
+                    "status": "needs_review",
+                    "confidence": "intrafile_taint_candidate" if is_taint_flow else "structural_pattern",
+                    "evidence": ("Local CE taint rule matched a configured source-to-sink flow; confirm framework semantics and sanitization"
+                                 if is_taint_flow else
+                                 "Local parser rule matched a sensitive sink; no input-taint or runtime proof")})
             return metadata, findings
         except OutputLimitExceeded:
             metadata["status"] = "output_limit"
@@ -123,5 +181,6 @@ def review_semgrep(snapshots, files):
     except (OSError, ValueError, RecursionError) as error:
         # Staging/configuration failures must preserve the native review results.
         return {"tool": "semgrep", "mode": "local_ce_rules", "status": "error",
-                "rule_languages": sorted({row["language"] for row in files} & PATTERNS.keys()),
+                "rule_languages": _rule_languages(files),
+                "taint_rule_languages": sorted({row["language"] for row in files if isinstance(row, dict)} & TAINT_RULES.keys()),
                 "scanned_files": [], "error_count": 1, "error_type": type(error).__name__}, []
