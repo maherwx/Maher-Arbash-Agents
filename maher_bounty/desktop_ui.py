@@ -394,29 +394,90 @@ def launch_desktop(parser):
         if name == "agent-tools-run":
             from .tool_readiness import tool_readiness_snapshot
 
+            from .agent_tool_router import SUPPORTED_AGENT_TOOLS
+
             readiness_text = tk.StringVar()
-            readiness_box = ttk.LabelFrame(form, text="\u062a\u0648\u0641\u0631 \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u062d\u0644\u064a\u0629", padding=8)
+            readiness_box = ttk.LabelFrame(form, text="اختر الأدوات المحلية", padding=8)
             readiness_box.pack(fill="x", pady=(14, 4))
             ttk.Label(readiness_box, textvariable=readiness_text, justify="left",
                       wraplength=730).pack(anchor="w", fill="x")
+            tool_rows_frame = ttk.Frame(readiness_box)
+            tool_rows_frame.pack(fill="x", pady=(6, 2))
+            selected_tool_widgets = {}
+            saved_selection = saved.get("_selected_tools")
+            saved_selection = set(saved_selection) if isinstance(saved_selection, list) else None
+            snapshot = tool_readiness_snapshot()
+            readiness_by_name = {row["tool"]: row for row in snapshot["tools"]}
+            available_tools = {row["tool"] for row in snapshot["tools"] if row.get("available") is True}
+
+            def availability_label(row):
+                if row.get("status") == "available":
+                    return "متاح"
+                if row.get("status") == "dependency_present_browser_unverified":
+                    return "Playwright مثبت؛ المتصفح غير متحقق"
+                if row.get("status") == "workflow_only":
+                    return "يحتاج ملف هوية وسير عمل"
+                return "غير مثبت"
+
+            for index, tool in enumerate(sorted(SUPPORTED_AGENT_TOOLS)):
+                row = readiness_by_name.get(tool, {"status": "missing", "available": False})
+                is_available = row.get("available") is True
+                initially_selected = tool in (saved_selection if saved_selection is not None else available_tools)
+                variable = tk.BooleanVar(value=initially_selected and is_available)
+                selected_tool_vars[tool] = variable
+                checkbox = ttk.Checkbutton(
+                    tool_rows_frame,
+                    text=f"{tool}  •  {availability_label(row)}",
+                    variable=variable,
+                    command=lambda: update_selected_count(),
+                )
+                checkbox.grid(row=index // 2, column=index % 2, sticky="w", padx=(2, 14), pady=2)
+                if not is_available:
+                    checkbox.configure(state="disabled")
+                selected_tool_widgets[tool] = checkbox
+
+            def update_selected_count():
+                chosen = sum(variable.get() for variable in selected_tool_vars.values())
+                readiness_text.set(
+                    f"متاح {len(available_tools)} من {snapshot['total_count']} محولًا. "
+                    f"المحدد: {chosen}. الوكلاء يخططون تلقائيًا بالأدوات المختارة."
+                )
+
+            def select_available_tools():
+                for tool, variable in selected_tool_vars.items():
+                    variable.set(tool in available_tools)
+                update_selected_count()
+
+            def clear_tool_selection():
+                for variable in selected_tool_vars.values():
+                    variable.set(False)
+                update_selected_count()
+
+            actions = ttk.Frame(readiness_box)
+            actions.pack(fill="x", pady=(4, 0))
+            ttk.Button(actions, text="تحديد المتاحة",
+                       command=select_available_tools).pack(side="left")
+            ttk.Button(actions, text="مسح التحديد",
+                       command=clear_tool_selection).pack(side="left", padx=6)
 
             def refresh_readiness():
-                snapshot = tool_readiness_snapshot()
-                lines = [f"\u0645\u062a\u0627\u062d {snapshot['available_count']} \u0645\u0646 {snapshot['total_count']} \u0645\u062d\u0648\u0651\u0644\u064b\u0627. \u0647\u0630\u0627 \u064a\u0641\u062d\u0635 PATH \u0648\u0627\u0644\u062a\u0628\u0639\u064a\u0627\u062a \u0641\u0642\u0637; \u0644\u0627 \u064a\u0634\u063a\u0651\u0644 \u0623\u062f\u0648\u0627\u062a."]
-                for row in snapshot["tools"]:
-                    if row["status"] == "available":
-                        state_label = "\u0645\u062a\u0627\u062d"
-                    elif row["status"] == "dependency_present_browser_unverified":
-                        state_label = "Playwright \u0645\u062a\u0627\u062d\u061b \u0627\u0644\u0645\u062a\u0635\u0641\u062d \u063a\u064a\u0631 \u0645\u062a\u062d\u0642\u0642"
-                    elif row["status"] == "workflow_only":
-                        state_label = "\u0639\u0628\u0631 \u0645\u0644\u0641 \u0633\u064a\u0631 \u0639\u0645\u0644"
-                    else:
-                        state_label = "\u063a\u064a\u0631 \u0645\u062b\u0628\u062a"
-                    lines.append(f"{row['tool']} \u2014 {state_label}")
-                readiness_text.set("\n".join(lines))
+                refreshed = tool_readiness_snapshot()
+                refreshed_by_name = {row["tool"]: row for row in refreshed["tools"]}
+                for tool, checkbox in selected_tool_widgets.items():
+                    row = refreshed_by_name.get(tool, {"status": "missing", "available": False})
+                    is_available = row.get("available") is True
+                    checkbox.configure(
+                        state="normal" if is_available else "disabled",
+                        text=f"{tool}  •  {availability_label(row)}",
+                    )
+                    if not is_available:
+                        selected_tool_vars[tool].set(False)
+                available_tools.clear()
+                available_tools.update(row["tool"] for row in refreshed["tools"] if row.get("available") is True)
+                update_selected_count()
 
-            ttk.Button(readiness_box, text="\u062a\u062d\u062f\u064a\u062b \u062d\u0627\u0644\u0629 \u0627\u0644\u0623\u062f\u0648\u0627\u062a",
-                       command=refresh_readiness).pack(anchor="e", pady=(6, 0))
+            ttk.Button(actions, text="تحديث حالة الأدوات",
+                       command=refresh_readiness).pack(side="right")
             refresh_readiness()
         canvas.yview_moveto(0)
 
@@ -445,9 +506,11 @@ def launch_desktop(parser):
             if value:
                 argv.extend([flag, value] if flag else [value])
         if selected.get() == "agent-tools-run":
-            for tool, variable in selected_tool_vars.items():
-                if variable.get():
-                    argv.extend(["--tool", tool])
+            chosen_tools = [tool for tool, variable in selected_tool_vars.items() if variable.get()]
+            if not chosen_tools:
+                raise ValueError("حدّد أداة محلية متاحة واحدة على الأقل")
+            for tool in chosen_tools:
+                argv.extend(["--tool", tool])
             brief = operator_brief_box.get("1.0", "end-1c").strip() if operator_brief_box is not None else ""
             if brief:
                 local_model_enabled = any(action.dest == "local_model" and variable.get()
