@@ -50,8 +50,10 @@ def _exec(cmd: list[str], *, timeout: int, output: Path | None = None, input_tex
             error_category = "nuclei_templates_missing"
         print(f"[ACTIVE] {tool:<12} {status.upper()}", flush=True)
         if status != "ok" and (stderr_tail or stdout_tail):
-            diagnostic = (stderr_tail or stdout_tail).replace("\n", " ")[:400]
-            print(f"[ACTIVE] {tool:<12} ERROR: {diagnostic}", flush=True)
+            diagnostic = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "",
+                                f"stderr: {_tail(stderr_tail, 180)} | stdout: {_tail(stdout_tail, 180)}")
+            diagnostic = diagnostic.replace("\n", " ")
+            print(f"[ACTIVE] {tool:<12} ERROR: {diagnostic[-400:]}", flush=True)
         return {
             "tool": tool, "status": status, "returncode": cp.returncode, "command": cmd, "timeout_seconds": effective_timeout,
             "output": str(output) if output else None, "stderr_tail": stderr_tail, "stdout_tail": stdout_tail,
@@ -293,7 +295,9 @@ def run_active_testing(target: str | None, inventory: dict, out_dir: str | Path,
             })
             nikto_out = host_dir / "nikto.txt"
             runs.append(_exec(["nikto", "-h", scan_target, "-nointeractive"], timeout=120, output=nikto_out))
-            runs.append(run_zap_baseline(scan_target, host_dir, scope, _exec))
+            zap_run = run_zap_baseline(scan_target, host_dir, scope, _exec)
+            findings.extend(zap_run.pop("findings", []))
+            runs.append(zap_run)
         else:
             for tool in ("katana", "ffuf/gobuster", "nikto", "zap-baseline.py"):
                 runs.append({
