@@ -16,17 +16,24 @@ maher-bounty agent-tools-run --targets targets.json --scope scope.json --authori
 maher-bounty agent-tools-run --targets targets.json --scope scope.json --authorized --rounds 3 --out results/tools
 ```
 
-For a simpler single-URL run, the command also accepts `--target`. A local Burp
-XML or ZAP/HAR export can contribute only its exact URLs that pass the same scope
-policy; the combined input is capped at 120 URLs. Repeat `--tool` to select fixed
-adapters. Leaving it empty keeps the local readiness-aware coordinator in charge.
+For a single-URL run, `--target` is sufficient: omit `--scope` and that URL's
+host becomes the scope. The URL-list form `--targets` still requires an explicit
+scope file. With no repeated `--tool` options, the readiness-aware coordinator
+plans all installed adapters allowed by the selected profile. Repeating `--tool`
+restricts the run to those fixed adapters. An optional local Burp XML or ZAP/HAR
+export can contribute only exact in-scope URLs; it does not launch either proxy.
 
 ```sh
 maher-bounty agent-tools-run --target "https://authorized.example/search?q=demo" \
-  --scope scope.json --authorized --traffic burp-export.xml \
+  --authorized \
   --tool nuclei --tool zap-baseline.py --tool nmap --out results/selected-tools
 ```
 
+ZAP Baseline runs directly from the target URL when installed. Burp is not
+launched by this command; proxy-export import is available to CLI workflows
+when a capture already exists. PortSwigger's documentation states Burp Scanner
+is available in Professional and DAST, not Community Edition, and describes
+starting desktop scans through Burp's scan launcher. See [Burp's first-scan guide](https://portswigger.net/burp/documentation/desktop/getting-started/running-your-first-scan).
 Importing an export parses it locally and does not launch Burp or ZAP. A natural
 language operator brief requires `--local-model --operator-brief "..."`; it guides
 only the already constrained local reviewers. It cannot change scope, credentials,
@@ -115,8 +122,9 @@ the process-tree runtime, not a shell interpreter. Missing installations,
 nonzero exit codes, launch failures, timeouts and output limits remain explicit.
 The router is not an unrestricted interactive terminal, does not install tools,
 and does not implement arbitrary Burp extensions or full commercial Burp scanning.
-Authenticated browser requests need a supplied workflow profile through the
-existing workflow/full-pipeline path; this direct command rejects that adapter.
+Authenticated browser requests can use `--workflow-manifest` with an explicit
+`browser_xss_profile`; the fixed verifier requires a supplied identity and
+session proof and remains restricted to that origin and in-scope query URLs.
 
 Artifacts: `agent-tool-plan.json`, `agent-tool-results.json` and per-round
 execution files/checkpoints. Plan generation is distinct from execution;
