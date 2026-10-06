@@ -48,7 +48,7 @@ OPERATION_DESCRIPTIONS = {
 }
 OPERATION_DESCRIPTIONS["agent-tools-run"] = (
     "\u0623\u062f\u062e\u0644 \u0631\u0627\u0628\u0637\u064b\u0627 \u0636\u0645\u0646 \u0627\u0644\u0646\u0637\u0627\u0642\u060c \u0648\u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0627\u0644\u062a\u064a \u062a\u0631\u064a\u062f \u062a\u0634\u063a\u064a\u0644\u0647\u0627 \u0645\u0646 \u0627\u0644\u0642\u0627\u0626\u0645\u0629. \u0627\u062e\u062a\u0631 \u0645\u0646 \u0639\u0634\u0631\u0629 \u0645\u062d\u0648\u0651\u0644\u0627\u062a \u062b\u0627\u0628\u062a\u0629. "
-    "ملف Burp XML أو ZAP HAR اختياري لمن لديه تصدير محفوظ مسبقًا؛ يضيف الروابط المطابقة للنطاق فقط ولا يشغّل Burp أو ZAP. "
+    "الرابط يحدد المضيف نطاقًا تلقائيًا. ZAP والمحوّلات المثبتة تعمل مباشرة؛ Burp لا يُشغّل كفاحص تلقائي من هذا الأمر. "
     "\u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0643 \u062a\u062d\u062a\u0627\u062c \u0646\u0645\u0648\u0630\u062c GGUF \u0645\u062d\u0644\u064a\u064b\u0627\u060c \u0648\u062a\u0628\u0642\u0649 \u0645\u0642\u064a\u062f\u0629 \u0628\u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0648\u0627\u0644\u0642\u0648\u0627\u0644\u0628 \u0648\u0627\u0644\u0646\u0637\u0627\u0642."
 )
 FIELD_LABELS = {
@@ -282,8 +282,14 @@ def launch_desktop(parser):
             if name == "agent-tools-run" and action.dest == "targets":
                 # The guided screen accepts a single exact URL. The CLI still accepts URL-list files.
                 continue
+            if name == "agent-tools-run" and action.dest == "scope":
+                # A single URL supplies the default exact-host scope for this guided command.
+                continue
+            if name == "agent-tools-run" and action.dest == "traffic":
+                # The guided URL flow does not require a proxy export file.
+                continue
             if name == "agent-tools-run" and action.dest == "tool":
-                tool_box = ttk.LabelFrame(form, text="\u0627\u062e\u062a\u0631 \u0627\u0644\u0645\u062d\u0648\u0651\u0644\u0627\u062a \u0627\u0644\u062b\u0627\u0628\u062a\u0629 (\u0627\u062a\u0631\u0643\u0647\u0627 \u0641\u0627\u0631\u063a\u0629 \u0644\u0644\u062e\u0637\u0629 \u0627\u0644\u0645\u062d\u0644\u064a\u0629) ", padding=8)
+                tool_box = ttk.LabelFrame(form, text="حدد الأدوات أو اتركها فارغة لتشغيل كل المثبت منها", padding=8)
                 tool_box.pack(fill="x", pady=8)
                 for index, (tool, label_text) in enumerate(ADVANCED_TOOL_CHOICES):
                     variable = tk.BooleanVar(value=tool in saved.get("_selected_tools", []))
@@ -340,7 +346,7 @@ def launch_desktop(parser):
                     ttk.Label(form, text=help_text, wraplength=700).pack(anchor="w", padx=29)
             fields.append((action, flag, variable, required))
         if name == "agent-tools-run":
-            note = ttk.Label(form, text="لا تحتاج ملفًا للفحص العادي: أدخل الرابط وملف النطاق فقط. ملف Burp XML أو ZAP HAR مطلوب فقط لاستيراد تصدير محفوظ من قبل.",
+            note = ttk.Label(form, text="أدخل الرابط فقط وأكّد الإذن. ترك خيارات الأدوات فارغة يشغّل المحوّلات المثبتة المسموحة. يعمل ZAP وأدوات الطرفية مباشرة؛ Burp لا يُشغّل كفاحص تلقائي من هذا الأمر.",
                              wraplength=730, justify="left")
             note.pack(anchor="w", pady=(3, 8))
         if name == "agent-tools-run":
