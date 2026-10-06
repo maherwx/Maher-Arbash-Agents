@@ -592,8 +592,8 @@ def run_agent_tool_requests(
         run = _exec([
             "arjun", "-u", scan_url, "-m", "GET", "-w", "small", "-c", "25",
             "-t", "1", "-T", "10", "-d", "0.5", "--rate-limit", "2",
-            "--stable", "--disable-redirects", "-q", "-o", str(output),
-        ], timeout=240)
+            "--stable", "--disable-redirects", "-o", str(output),
+        ], timeout=120, progress=True)
         run["target"] = scan_url
         discovered, telemetry = _arjun_parameter_urls(output, scan_url, scope, known)
         if run.get("status") != "ok":
